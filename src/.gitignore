@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Distribution / packaging
+.Python
+build/
+dist/
+.eggs/
+*.egg-info/
+.installed.cfg
+*.manifest
+*.spec
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Byte-compiled
+*$py.class
+
+# Test & coverage reports
+.coverage
+.tox/
+pytest_cache/
+htmlcov/
+
+# Redis dump
+*.rdb
+
+# Models and large files
+models/
+
+tmp/
+demo_client/node_modules

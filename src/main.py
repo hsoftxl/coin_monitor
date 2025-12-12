@@ -18,20 +18,33 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
     """
     Process a single symbol across all exchanges.
     """
-    # logger.info(f"Analyzing {symbol}...")
+    # 0. Pre-filter: Check which exchanges support this symbol
+    valid_connectors = {}
+    for name, conn in connectors.items():
+        try:
+            # Check if exchange has this symbol loaded
+            if conn.exchange and conn.exchange.markets:
+                if symbol in conn.exchange.symbols:
+                    valid_connectors[name] = conn
+        except:
+            pass
     
-    # 1. Fetch Data
+    if not valid_connectors:
+        # No exchange supports this symbol, skip silently
+        return
+    
+    # 1. Fetch Data (only from valid exchanges)
     # Fetch Candles
     tasks = {
         name: conn.fetch_standard_candles(symbol=symbol, limit=Config.LIMIT_KLINE) 
-        for name, conn in connectors.items()
+        for name, conn in valid_connectors.items()
     }
     results = await asyncio.gather(*tasks.values(), return_exceptions=True)
     
     # Fetch Trades (Best effort for Whale Watcher)
     trade_tasks = {
          name: conn.fetch_trades(symbol=symbol, limit=100)
-         for name, conn in connectors.items()
+         for name, conn in valid_connectors.items()
     }
     trade_results = await asyncio.gather(*trade_tasks.values(), return_exceptions=True)
 
@@ -121,19 +134,34 @@ async def main():
         logger.error("无可用连接器，退出。")
         return
 
-    # Coin Discovery
+    # Coin Discovery - OKX Only
     target_symbols = [Config.SYMBOL]
     if Config.ENABLE_MULTI_SYMBOL:
-        logger.info("正在扫描全平台共有币种...")
-        sd = SymbolDiscovery()
-        common = await sd.get_common_symbols()
-        if common:
-            # Filter top 20 alphabetically or by some criteria to avoid 27 taking too long if rate limited?
-            # 27 is fine.
-            target_symbols = common
-            logger.info(f"✅ 监控列表 ({len(target_symbols)}): {', '.join(target_symbols)}")
-        else:
-            logger.warning("❌ 未发现共有币种，回退到默认币种。")
+        logger.info("正在扫描 OKX 平台所有 USDT 交易对...")
+        try:
+            # Initialize OKX temporarily just for symbol discovery
+            okx_temp = OKXConnector()
+            await okx_temp.initialize()
+            await okx_temp.exchange.load_markets()
+            
+            okx_symbols = []
+            for s in okx_temp.exchange.symbols:
+                if '/USDT' in s:
+                    okx_symbols.append(s)
+            
+            await okx_temp.close()
+            
+            if okx_symbols:
+                # Sort alphabetically
+                target_symbols = sorted(okx_symbols)
+                logger.info(f"✅ OKX 监控列表 ({len(target_symbols)} 个币种)")
+                # Log first 10 for preview
+                logger.info(f"   示例: {', '.join(target_symbols[:10])}...")
+            else:
+                logger.warning("❌ 未发现 OKX USDT 交易对，回退到默认币种。")
+        except Exception as e:
+            logger.error(f"OKX 币种扫描失败: {e}")
+            logger.warning("回退到默认币种。")
 
     taker_analyzer = TakerFlowAnalyzer(window=50)
     multi_analyzer = MultiPlatformAnalyzer()

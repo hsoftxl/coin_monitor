@@ -58,5 +58,9 @@ class BinanceConnector(ExchangeConnector):
                 ))
             return candles
         except Exception as e:
+            # Silently skip invalid symbols (e.g., OKX-specific formats like "COIN/USDT:USDT")
+            if "Invalid symbol" in str(e) or "-1121" in str(e):
+                return []
+            # Log other errors
             logger.error(f"Binance fetch failed: {e}")
             return []

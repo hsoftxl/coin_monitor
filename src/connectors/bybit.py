@@ -2,16 +2,21 @@ from typing import List, Dict
 from src.connectors.base import ExchangeConnector
 from src.models import StandardCandle
 from src.utils.logger import logger
+from src.config import Config
 
 class BybitConnector(ExchangeConnector):
     def __init__(self):
         super().__init__('bybit')
 
-    async def fetch_standard_candles(self, limit: int = 100) -> List[StandardCandle]:
+    async def fetch_standard_candles(self, symbol: str = None, limit: int = Config.LIMIT_KLINE) -> List[StandardCandle]:
+        target_symbol = symbol or self.symbol
         try:
-            # Bybit strategy similar to Coinbase if KLine lacks Taker
-            candles_data = await self.fetch_ohlcv(limit=limit)
-            trades = await self.fetch_trades(limit=1000)
+            # 1. Fetch OHLCV
+            candles_data = await self.fetch_ohlcv(target_symbol, limit=limit)
+            
+            # 2. Fetch Trades for Taker Volume Approximation
+            # Bybit 'fetch_trades' returns standardized structure.
+            trades = await self.fetch_trades(target_symbol, limit=Config.LIMIT_TRADES)
             
             tf_ms = 15 * 60 * 1000
             taker_map: Dict[int, float] = {}

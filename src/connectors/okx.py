@@ -1,65 +1,81 @@
-from typing import List
+from typing import List, Dict
 from src.connectors.base import ExchangeConnector
 from src.models import StandardCandle
 from src.utils.logger import logger
+from src.config import Config
+import time
 
 class OKXConnector(ExchangeConnector):
     def __init__(self):
         super().__init__('okx')
 
-    async def fetch_standard_candles(self, limit: int = 100) -> List[StandardCandle]:
+    async def fetch_standard_candles(self, symbol: str = None, limit: int = Config.LIMIT_KLINE) -> List[StandardCandle]:
+        target_symbol = symbol or self.symbol
         try:
-            # OKX raw candles: [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm]
-            # Symbol: ETH/USDT -> ETH-USDT (usually)
-            symbol = self.symbol.replace('/', '-')
-            response = await self.exchange.public_get_market_candles({
-                'instId': symbol,
-                'bar': self.timeframe,
-                'limit': limit
-            })
-            # OKX returns data usually in reverse chronological order (newest first)? 
-            # CCXT usually normalizes. public_get returns raw. 
-            # Check API docs: "Data is sorted by time in descending order".
-            # We usually want ascending.
+            # 1. Fetch OHLCV for price/volume structure
+            candles_data = await self.fetch_ohlcv(target_symbol, limit=limit)
             
-            data = response.get('data', [])
+            # 2. Fetch Trades for Taker Volume Approximation
+            trades = await self.fetch_trades(target_symbol, limit=Config.LIMIT_TRADES)
+            
+            # Determine timeframe in ms
+            tf_map = {'1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000}
+            tf_ms = tf_map.get(self.timeframe, 900000)
+            
+            # Aggregate trades into candle buckets
+            taker_map: Dict[int, Dict[str, float]] = {}
+            oldest_trade_ts = None
+            
+            for t in trades:
+                ts = t['timestamp']
+                if oldest_trade_ts is None or ts < oldest_trade_ts:
+                    oldest_trade_ts = ts
+                    
+                candle_ts = (ts // tf_ms) * tf_ms
+                
+                if candle_ts not in taker_map:
+                    taker_map[candle_ts] = {'buy': 0.0, 'sell': 0.0}
+                
+                # OKX trade structure: side is 'buy' or 'sell' from taker perspective
+                cost = t['cost']  # Quote volume (USDT)
+                if t['side'] == 'buy':
+                    taker_map[candle_ts]['buy'] += cost
+                else:
+                    taker_map[candle_ts]['sell'] += cost
+            
+            # Build StandardCandle list
             candles = []
-            for k in reversed(data): # Reverse to ascending
-                # volCcyQuote (index 7) is Quote Volume (USDT).
-                # OKX Design says: "Use volCcyQuote".
-                # But is it Taker? The Design says "Use it".
-                # We will map it to volume. 
-                # Calculating Taker Buy specifically is not possible from this field alone if it's Total.
-                # But we follow the spec.
-                # We will set taker_buy_volume as None or maybe 50%?
-                # Wait, if we can't get Taker, we can't do "Taker Flow Analysis".
-                # The Design says "OKX K-line has volCcyQuote ... Solution: Direct use that value, results in USDT."
-                # It lists it under "Exchange Taker Buy Volume Extraction Source".
-                # This explicitly implies the user CONSIDERS `volCcyQuote` as the Taker Volume source.
-                # It might be a mistake in the user's knowledge, but I must follow "Taker Buy Volume Extraction Source".
-                # So I assign `volCcyQuote` to `taker_buy_volume`?
-                # Or does it mean calculate from it? 
-                # "Taker Buy Volume ... Source: volCcyQuote".
-                # I will assign it to `taker_buy_volume`.
-                # Note: `volCcyQuote` is usually TOTAL Quote Volume. Assigning it to Taker Buy is weird (implies 100% Taker Buy).
-                # But I will follow the "Extraction Source" table instruction literally.
-                # Actually, maybe it means "Use this for volume normalization".
-                # But the column header is "Taker Buy Volume Extraction Source".
-                # I will use it as Taker Buy Volume.
+            for ohlcv in candles_data:
+                ts = int(ohlcv[0])
+                candle_ts = (ts // tf_ms) * tf_ms
+                
+                # Check if we have trade data for this candle
+                if candle_ts in taker_map:
+                    taker_buy = taker_map[candle_ts]['buy']
+                    taker_sell = taker_map[candle_ts]['sell']
+                elif oldest_trade_ts and ts < oldest_trade_ts:
+                    # Candle is older than our trade history
+                    taker_buy = None
+                    taker_sell = None
+                else:
+                    # No trades in this candle (low activity)
+                    taker_buy = 0.0
+                    taker_sell = 0.0
                 
                 candles.append(StandardCandle(
-                    timestamp=int(k[0]),
-                    open=float(k[1]),
-                    high=float(k[2]),
-                    low=float(k[3]),
-                    close=float(k[4]),
-                    volume=float(k[5]), # Base volume
-                    taker_buy_volume=float(k[7]), # Using quote volume as requested, treating as 'quote' type
-                    taker_sell_volume=0.0, # Cannot deduce
-                    quote_volume=float(k[7]),
-                    volume_type='quote', # Result is already USDT
+                    timestamp=ts,
+                    open=float(ohlcv[1]),
+                    high=float(ohlcv[2]),
+                    low=float(ohlcv[3]),
+                    close=float(ohlcv[4]),
+                    volume=float(ohlcv[5]),
+                    taker_buy_volume=taker_buy,
+                    taker_sell_volume=taker_sell,
+                    quote_volume=float(ohlcv[5]) * float(ohlcv[4]),  # Approximate
+                    volume_type='quote',
                     exchange_id=self.exchange_id
                 ))
+            
             return candles
         except Exception as e:
             logger.error(f"OKX fetch failed: {e}")

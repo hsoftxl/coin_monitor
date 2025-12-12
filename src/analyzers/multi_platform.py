@@ -7,7 +7,7 @@ class MultiPlatformAnalyzer:
     Aggregates signals from multiple exchanges.
     """
     
-    def analyze_signals(self, platform_metrics: Dict[str, dict]) -> List[dict]:
+    def analyze_signals(self, platform_metrics: Dict[str, dict], symbol: str = "UNKNOWN") -> List[dict]:
         """
         platform_metrics: { 'binance': {'cumulative_net_flow': ..., 'buy_sell_ratio': ...}, ... }
         """
@@ -31,6 +31,7 @@ class MultiPlatformAnalyzer:
              # Design: "All 4".
              if count_valid == 4:
                  signals.append({
+                     'symbol': symbol,
                      'type': '全球协同看涨 (Global Sync Bullish)',
                      'grade': 'A+',
                      'desc': '主力全平台吸筹，市场做多情绪一致。'
@@ -51,6 +52,7 @@ class MultiPlatformAnalyzer:
             if cb_flow > (avg_flow * 1.5) and cb_flow > 1000000: # Arbitrary large number threshold or relative?
                 # Design says "Significantly higher".
                 signals.append({
+                     'symbol': symbol,
                      'type': '美资机构吸筹 (US Institutional Accumulation)',
                      'grade': 'A',
                      'desc': 'Coinbase 领涨，机构资金流入显著。'
@@ -65,6 +67,7 @@ class MultiPlatformAnalyzer:
         
         if binance_flow > 0 and coinbase_flow < 0:
              signals.append({
+                 'symbol': symbol,
                  'type': '单平台诱多 (Single Platform Long Trap)',
                  'grade': 'C',
                  'desc': '东方交易所买入，西方交易所卖出。警惕诱多。'

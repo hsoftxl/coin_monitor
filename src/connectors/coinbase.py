@@ -3,22 +3,23 @@ from src.connectors.base import ExchangeConnector
 from src.models import StandardCandle
 from src.utils.logger import logger
 import time
+from src.config import Config
 
 class CoinbaseConnector(ExchangeConnector):
     def __init__(self):
         super().__init__('coinbase')
 
-    async def fetch_standard_candles(self, limit: int = 100) -> List[StandardCandle]:
+    async def fetch_standard_candles(self, symbol: str = None, limit: int = Config.LIMIT_KLINE) -> List[StandardCandle]:
+        target_symbol = symbol or self.symbol
         try:
             # 1. Fetch OHLCV for price/total volume
-            candles_data = await self.fetch_ohlcv(limit=limit)
+            candles_data = await self.fetch_ohlcv(target_symbol, limit=limit)
             
-            # 2. Fetch Trades for Taker Flow
-            # Coinbase allows fetching trades. We might need many calls for 100 candles? 
-            # 100 * 15m = 25 hours. fetch_trades limit is usually small. 
+            # 2. Fetch Trades for Taker Volume Approximation
+            # Coinbase 'fetch_trades' returns standardized structure.
             # We can only realistically calculate Taker Flow for the VERY RECENT candles (last 1-2).
             # The user accepted this limitation.
-            trades = await self.fetch_trades(limit=1000)
+            trades = await self.fetch_trades(target_symbol, limit=Config.LIMIT_TRADES)
             
             # Aggregate trades into buckets
             # Timeframe 15m = 900s = 900000ms

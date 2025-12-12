@@ -51,3 +51,4 @@ models/
 
 tmp/
 demo_client/node_modules
+logs

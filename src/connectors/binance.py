@@ -2,21 +2,29 @@ from typing import List
 from src.connectors.base import ExchangeConnector
 from src.models import StandardCandle
 from src.utils.logger import logger
+from src.config import Config # Added import for Config
 
 class BinanceConnector(ExchangeConnector):
     def __init__(self):
         super().__init__('binance')
 
-    async def fetch_standard_candles(self, limit: int = 100) -> List[StandardCandle]:
+    async def fetch_standard_candles(self, symbol: str = None, limit: int = Config.LIMIT_KLINE) -> List[StandardCandle]:
+        target_symbol = symbol or self.symbol
         try:
-            # Binance raw klines: [Open time, Open, High, Low, Close, Volume, Close time, Quote volume, Trades, Taker buy base, Taker buy quote, Ignore]
-            # Symbol format: ETH/USDT -> ETHUSDT
-            symbol = self.symbol.replace('/', '')
-            response = await self.exchange.public_get_klines({
-                'symbol': symbol,
+            # Binance: k[9] is Taker Buy Base Asset Volume, k[10] is Taker Buy Quote Asset Volume
+            # fetch_ohlcv doesn't return these extra fields usually unless specified?
+            # CCXT fetch_ohlcv typically only returns [ts, o, h, l, c, v]. 
+            # We need to use `public_get_klines` to get full response or check if ccxt returns it.
+            # CCXT might map it or we use raw request. 
+            # Using raw request for maximum control as per previous design logic.
+            
+            market = self.exchange.market(target_symbol)
+            params = {
+                'symbol': market['id'],
                 'interval': self.timeframe,
                 'limit': limit
-            })
+            }
+            response = await self.exchange.public_get_klines(params)
             
             candles = []
             for k in response:

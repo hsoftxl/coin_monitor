@@ -37,11 +37,19 @@ class TakerFlowAnalyzer:
         support_low = valid_df['low'].min() if not valid_df.empty else 0.0
         # Resistance = Highest High in window
         resistance_high = valid_df['high'].max() if not valid_df.empty else 0.0
+        
+        prev_close = valid_df['close'].shift(1)
+        tr1 = valid_df['high'] - valid_df['low']
+        tr2 = (valid_df['high'] - prev_close).abs()
+        tr3 = (valid_df['low'] - prev_close).abs()
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = true_range.mean() if not true_range.empty else 0.0
 
         return {
             'cumulative_net_flow': cumulative_net_flow,
             'buy_sell_ratio': ratio,
             'current_price': current_price,
             'support_low': support_low,
-            'resistance_high': resistance_high
+            'resistance_high': resistance_high,
+            'atr': atr
         }

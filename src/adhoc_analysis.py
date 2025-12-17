@@ -19,6 +19,7 @@ from src.analyzers.multi_platform import MultiPlatformAnalyzer
 from src.analyzers.whale_watcher import WhaleWatcher
 from src.services.notification import NotificationService
 from src.strategies.entry_exit import EntryExitStrategy
+from src.storage.persistence import Persistence
 
 # Disable default logger for clean output
 logger.remove()
@@ -59,6 +60,7 @@ async def analyze_market():
     multi_analyzer = MultiPlatformAnalyzer()
     notification_service = NotificationService() if (Config.ENABLE_DINGTALK or Config.ENABLE_WECHAT) else None
     strategy = EntryExitStrategy() if Config.ENABLE_STRATEGY else None
+    persistence = Persistence(Config.PERSIST_DB_PATH) if Config.ENABLE_PERSISTENCE else None
     
     reports = []
     
@@ -101,8 +103,12 @@ async def analyze_market():
         signals = multi_analyzer.analyze_signals(platform_metrics, symbol)
         if strategy:
             rec = strategy.evaluate(platform_metrics, consensus, signals, symbol)
+            pos = strategy.compute_position(rec) if rec.get('action') else {}
+            rec.update(pos)
             if rec.get('action') and notification_service:
                 await notification_service.send_strategy_recommendation(rec, platform_metrics)
+            if rec.get('action') and persistence:
+                persistence.save_recommendation(rec, platform_metrics)
         
         # Calculate Total Flow
         total_flow = sum(m['cumulative_net_flow'] for m in platform_metrics.values())

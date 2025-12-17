@@ -15,8 +15,9 @@ from src.analyzers.whale_watcher import WhaleWatcher
 from src.utils.discovery import SymbolDiscovery
 from src.services.notification import NotificationService
 from src.strategies.entry_exit import EntryExitStrategy
+from src.storage.persistence import Persistence
 
-async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service=None):
+async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service=None, persistence=None):
     """
     Process a single symbol across all exchanges.
     """
@@ -24,11 +25,15 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
     valid_connectors = {}
     for name, conn in connectors.items():
         try:
-            # Check if exchange has this symbol loaded
-            if conn.exchange and conn.exchange.markets:
-                if symbol in conn.exchange.symbols:
+            if not (conn.exchange and conn.exchange.markets):
+                continue
+            if symbol in conn.exchange.symbols:
+                valid_connectors[name] = conn
+            elif name == 'coinbase':
+                usd_symbol = symbol.replace('/USDT', '/USD')
+                if usd_symbol in conn.exchange.symbols:
                     valid_connectors[name] = conn
-        except:
+        except Exception:
             pass
     
     if not valid_connectors:
@@ -107,13 +112,19 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
         # 推送通知
         if notification_service:
             await notification_service.dispatch_signal(signal, platform_metrics, symbol)
+        if persistence:
+            persistence.save_signal(signal, platform_metrics, symbol)
 
     # 4.1 Strategy
     rec = strategy.evaluate(platform_metrics, consensus, signals, symbol)
+    pos = strategy.compute_position(rec) if rec.get('action') else {}
+    rec.update(pos)
     if rec.get('action'):
         logger.info(f"🎯 [{symbol}] 策略建议: {rec['action']} {rec['side']} @ {rec['price']:.4f} SL={rec.get('stop_loss')} TP={rec.get('take_profit')}")
         if notification_service:
             await notification_service.send_strategy_recommendation(rec, platform_metrics)
+        if persistence:
+            persistence.save_recommendation(rec, platform_metrics)
     # 5. Whale Watcher
     for i, (name, _) in enumerate(trade_tasks.items()):
         t_res = trade_results[i]
@@ -194,6 +205,7 @@ async def main():
     multi_analyzer = MultiPlatformAnalyzer()
     whale_watcher = WhaleWatcher(threshold=Config.WHALE_THRESHOLD) # $200k
     strategy = EntryExitStrategy()
+    persistence = Persistence(Config.PERSIST_DB_PATH) if Config.ENABLE_PERSISTENCE else None
     
     # 初始化通知服务
     notification_service = None
@@ -218,7 +230,7 @@ async def main():
             # Process symbols in chunks of 5 to control concurrency
             for i in range(0, len(target_symbols), 5):
                 chunk = target_symbols[i:i+5]
-                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service) for sym in chunk]
+                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service, persistence) for sym in chunk]
                 await asyncio.gather(*tasks)
                 # Small sleep between chunks to be nice to APIs
                 await asyncio.sleep(1)

@@ -30,6 +30,15 @@ class Config:
     ENABLE_STRATEGY = os.getenv("ENABLE_STRATEGY", "True").lower() == "true"
     STRATEGY_MIN_TOTAL_FLOW = float(os.getenv("STRATEGY_MIN_TOTAL_FLOW", "10000000"))
     STRATEGY_MIN_RATIO = float(os.getenv("STRATEGY_MIN_RATIO", "1.1"))
+    STRATEGY_MIN_INTERVAL_SEC = int(os.getenv("STRATEGY_MIN_INTERVAL_SEC", "900"))
+    STRATEGY_ATR_SL_MULT = float(os.getenv("STRATEGY_ATR_SL_MULT", "1.5"))
+    STRATEGY_ATR_TP_MULT = float(os.getenv("STRATEGY_ATR_TP_MULT", "2.0"))
+    STRATEGY_REQUIRE_MIDBAND = os.getenv("STRATEGY_REQUIRE_MIDBAND", "True").lower() == "true"
+    STRATEGY_MIN_CONSENSUS_BARS = int(os.getenv("STRATEGY_MIN_CONSENSUS_BARS", "2"))
+    ENABLE_PERSISTENCE = os.getenv("ENABLE_PERSISTENCE", "True").lower() == "true"
+    PERSIST_DB_PATH = os.getenv("PERSIST_DB_PATH", "data/signals.db")
+    STRATEGY_RISK_USD = float(os.getenv("STRATEGY_RISK_USD", "1000"))
+    STRATEGY_MAX_NOTIONAL_USD = float(os.getenv("STRATEGY_MAX_NOTIONAL_USD", "10000"))
     
     # Exchange Enabled Status
     EXCHANGES = {

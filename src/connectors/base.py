@@ -53,14 +53,14 @@ class ExchangeConnector(ABC):
         """
         Fetches OHLCV data with retry logic.
         """
-        target_symbol = symbol or self.symbol
+        target_symbol = self.resolve_symbol(symbol or self.symbol)
         return await self._retry_request(self.exchange.fetch_ohlcv, target_symbol, self.timeframe, limit=limit)
 
     async def fetch_trades(self, symbol: str = None, limit: int = Config.LIMIT_TRADES) -> List[Dict]:
         """
         Fetches recent trades with retry logic.
         """
-        target_symbol = symbol or self.symbol
+        target_symbol = self.resolve_symbol(symbol or self.symbol)
         return await self._retry_request(self.exchange.fetch_trades, target_symbol, limit=limit)
 
     async def _retry_request(self, func, *args, **kwargs):
@@ -82,3 +82,17 @@ class ExchangeConnector(ABC):
             except Exception as e:
                 logger.error(f"[{self.exchange_id}] Unexpected error: {e}")
                 raise
+
+    def resolve_symbol(self, symbol: str) -> str:
+        """
+        Resolve or remap symbol for exchange-specific quirks.
+        Default: return original symbol.
+        """
+        return symbol
+
+    def is_supported_symbol(self, symbol: str) -> bool:
+        resolved = self.resolve_symbol(symbol)
+        try:
+            return bool(self.exchange and resolved in self.exchange.symbols)
+        except Exception:
+            return False

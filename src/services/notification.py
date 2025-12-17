@@ -372,6 +372,8 @@ class NotificationService:
             k = flow / 1000
             color = 'green' if flow > 0 else 'red'
             lines.append(f"- {name.upper()}: <font color='{color}'>{k:+.0f}k USDT</font>")
+        pos_notional = recommendation.get('notional_usd')
+        pos_size = recommendation.get('size_base')
         text = f"""### 🎯 策略建议
 
 **币种**: **{symbol}**
@@ -380,6 +382,7 @@ class NotificationService:
 **止损**: {('未设置' if sl is None else f'${sl:.4f}')}
 **止盈**: {('未设置' if tp is None else f'${tp:.4f}')}
 **理由**: {reason}
+{"**建议仓位**: " + (f"{pos_size:.4f} 份基币 (~${pos_notional:,.0f})" if (pos_notional and pos_size) else "待风险参数计算") }
 
 ---
 

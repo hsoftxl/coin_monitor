@@ -9,9 +9,22 @@ class CoinbaseConnector(ExchangeConnector):
     def __init__(self):
         super().__init__('coinbase')
 
+    def resolve_symbol(self, symbol: str) -> str:
+        try:
+            if self.exchange and symbol not in self.exchange.symbols:
+                if symbol.endswith('/USDT'):
+                    usd_symbol = symbol.replace('/USDT', '/USD')
+                    if usd_symbol in self.exchange.symbols:
+                        return usd_symbol
+        except Exception:
+            pass
+        return symbol
+
     async def fetch_standard_candles(self, symbol: str = None, limit: int = Config.LIMIT_KLINE) -> List[StandardCandle]:
         target_symbol = symbol or self.symbol
         try:
+            if not self.is_supported_symbol(target_symbol):
+                return []
             # 1. Fetch OHLCV for price/total volume
             candles_data = await self.fetch_ohlcv(target_symbol, limit=limit)
             

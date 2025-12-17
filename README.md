@@ -13,6 +13,7 @@
 - ✅ **智能信号识别**: 自动检测全球协同、机构吸筹、诱多陷阱等信号
 - ✅ **市场共识分析**: 基于多平台数据判断市场整体趋势
 - ✅ **巨鲸监控**: 实时捕捉大额交易（默认 $200k+）
+- ✅ **实时推送通知**: 支持钉钉和企业微信群机器人推送（A+/A 级信号）
 
 ---
 
@@ -240,6 +241,135 @@ WHALE_THRESHOLD = 100000.0  # 改为 $100k（更宽松）
 - 警惕 **C 级诱多陷阱** 信号
 - 避免在平台分歧时追高
 - 等待资金流向一致后再操作
+
+---
+
+---
+
+## 📲 通知配置（钉钉 & 企业微信）
+
+系统支持将 A+/A 级信号实时推送到钉钉和企业微信群聊，确保不错过重要交易机会。
+
+### 1. 钉钉机器人配置
+
+**步骤 1**: 在钉钉群聊中添加自定义机器人
+1. 打开钉钉群聊 → 群设置 → 智能群助手 → 添加机器人
+2. 选择"自定义"机器人
+3. 设置机器人名称（如"资金流监控"）
+4. **安全设置**：选择"加签"方式（推荐）
+5. 复制 Webhook URL 和加签密钥
+
+**步骤 2**: 配置环境变量
+创建 `.env` 文件（参考 `.env.example`）:
+```bash
+ENABLE_DINGTALK=true
+DINGTALK_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN
+DINGTALK_SECRET=YOUR_SECRET_KEY
+```
+
+**消息示例**:
+```markdown
+### 🚨 全球主力资金监控系统报警
+
+**信号类型**: 全球协同看涨 (Global Sync Bullish)
+**信号等级**: A+
+**币种**: BTC/USDT
+**触发时间**: 2025-12-12 17:00:00
+
+---
+
+**平台资金流向** (过去50分钟):
+- 📈 BINANCE: +500k USDT
+- 📈 OKX: +200k USDT
+- 📈 BYBIT: +100k USDT
+- 📈 COINBASE: +50k USDT
+
+**市场共识**: 强力看涨 (全平台净流入)
+
+---
+
+**信号解读**: 主力全平台吸筹，市场做多情绪一致。
+
+🚀 **强烈建议**: 主力全平台建仓，适合追涨或加仓，止损设置在关键支撑位。
+```
+
+---
+
+### 2. 企业微信机器人配置
+
+**步骤 1**: 在企业微信群聊中添加群机器人
+1. 打开企业微信群聊 → 群设置 → 群机器人 → 添加机器人
+2. 设置机器人名称（如"资金流监控"）
+3. 复制 Webhook URL
+
+**步骤 2**: 配置环境变量
+```bash
+ENABLE_WECHAT=true
+WECHAT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY
+```
+
+---
+
+### 3. 推送策略
+
+| 通知类型 | 钉钉 | 企业微信 | @所有人 | 说明 |
+|---------|------|---------|---------|------|
+| **A+/A 级信号** | ✅ 立即 | ✅ 立即 | ✅ 是 | 最强信号，立即推送 |
+| **强力看涨/看跌** | ✅ 立即 | ✅ 立即 | ✅ 是 | 全平台共识，立即推送 |
+| **巨鲸交易** | ✅ 立即 | ✅ 立即 | ❌ 否 | ≥$500k 大额交易 |
+| **B 级信号** | ⏰ 30分钟汇总 | ✅ 立即 | ❌ 否 | 中等信号，延迟汇总 |
+| **C 级信号** | ❌ 仅日志 | ❌ 仅日志 | ❌ 否 | 低级信号，不推送 |
+
+**调整推送等级**:
+编辑 `src/config.py`:
+```python
+# 只推送 A+ 级信号
+NOTIFY_GRADES = ["A+"]
+
+# 推送 A+/A/B 级信号
+NOTIFY_GRADES = ["A+", "A", "B"]
+
+# 调整巨鲸阈值
+WHALE_NOTIFY_THRESHOLD = 1000000.0  # 改为 $1M
+
+# 禁用巨鲸通知
+ENABLE_WHALE_NOTIFY = False
+
+# 禁用共识通知
+ENABLE_CONSENSUS_NOTIFY = False
+```
+
+---
+
+### 4. 限流保护
+
+**API 限制**:
+- 钉钉：每个机器人每分钟最多 20 条消息
+- 企业微信：每个机器人每分钟最多 20 条消息
+
+**系统保护**:
+- B 级信号每 30 分钟汇总一次推送
+- C 级信号仅记录日志，不推送
+- 避免短时间内重复推送相同信号
+
+---
+
+### 5. 测试验证
+
+**测试推送**:
+```python
+# 在 Python 环境中测试
+from src.services.notification import NotificationService
+import asyncio
+
+async def test():
+    service = NotificationService()
+    message = "### 🚨 测试消息\n\n这是一条测试消息"
+    await service.send_dingtalk(message, at_all=False)
+    await service.send_wechat(message)
+
+asyncio.run(test())
+```
 
 ---
 

@@ -13,8 +13,10 @@ from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
 from src.analyzers.whale_watcher import WhaleWatcher
 from src.utils.discovery import SymbolDiscovery
+from src.services.notification import NotificationService
+from src.strategies.entry_exit import EntryExitStrategy
 
-async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher):
+async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service=None):
     """
     Process a single symbol across all exchanges.
     """
@@ -92,12 +94,26 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
     elif "看跌" in consensus or "BEARISH" in consensus: cons_tag = "red"
     
     logger.info(f"💰 <bold>{symbol.ljust(9)}</bold> | 共识: <{cons_tag}>{consensus.split('(')[0]}</{cons_tag}> | {' | '.join(log_parts)}")
+    
+    # 推送市场共识通知（强力看涨/看跌）
+    if notification_service:
+        await notification_service.send_consensus_alert(consensus, platform_metrics, symbol)
 
     # 4. Signals
     signals = multi_analyzer.analyze_signals(platform_metrics, symbol=symbol)
     for signal in signals:
         logger.critical(f"🚨 [{symbol}] 信号触发 [{signal['grade']}]: {signal['type']} - {signal['desc']}")
+        
+        # 推送通知
+        if notification_service:
+            await notification_service.dispatch_signal(signal, platform_metrics, symbol)
 
+    # 4.1 Strategy
+    rec = strategy.evaluate(platform_metrics, consensus, signals, symbol)
+    if rec.get('action'):
+        logger.info(f"🎯 [{symbol}] 策略建议: {rec['action']} {rec['side']} @ {rec['price']:.4f} SL={rec.get('stop_loss')} TP={rec.get('take_profit')}")
+        if notification_service:
+            await notification_service.send_strategy_recommendation(rec, platform_metrics)
     # 5. Whale Watcher
     for i, (name, _) in enumerate(trade_tasks.items()):
         t_res = trade_results[i]
@@ -108,6 +124,10 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
                  side_cn = "买入" if side == 'BUY' else "卖出"
                  color = "green" if side == 'BUY' else "red"
                  logger.warning(f"🐳 [{symbol}] 巨鲸监测 [{name.upper()}]: <{color}>{side_cn} ${w['cost']:,.0f}</{color}> @ {w['price']}")
+                 
+                 # 推送巨鲸通知
+                 if notification_service:
+                     await notification_service.send_whale_alert(w, symbol, name)
 
 
 async def main():
@@ -137,49 +157,69 @@ async def main():
     # Coin Discovery - OKX Only
     target_symbols = [Config.SYMBOL]
     if Config.ENABLE_MULTI_SYMBOL:
-        logger.info("正在扫描 OKX 平台所有 USDT 交易对...")
+        logger.info("正在扫描 Binance 平台所有 USDT 交易对...")
         try:
-            # Initialize OKX temporarily just for symbol discovery
-            okx_temp = OKXConnector()
-            await okx_temp.initialize()
-            await okx_temp.exchange.load_markets()
+            # Initialize Binance temporarily just for symbol discovery
+            binance_temp = BinanceConnector()
+            await binance_temp.initialize()
+            await binance_temp.exchange.load_markets()
+            tickers = await binance_temp.exchange.fetch_tickers()
+            b_symbols = []
+            for s, t in tickers.items():
+                if '/USDT' not in s:
+                    continue
+                qv = t.get('quoteVolume')
+                if qv is None:
+                    base_vol = t.get('baseVolume')
+                    last = t.get('last') or 0
+                    qv = (base_vol or 0) * last
+                if qv and qv >= Config.MIN_24H_QUOTE_VOLUME:
+                    b_symbols.append(s)
             
-            okx_symbols = []
-            for s in okx_temp.exchange.symbols:
-                if '/USDT' in s:
-                    okx_symbols.append(s)
+            await binance_temp.close()
             
-            await okx_temp.close()
-            
-            if okx_symbols:
+            if b_symbols:
                 # Sort alphabetically
-                target_symbols = sorted(okx_symbols)
-                logger.info(f"✅ OKX 监控列表 ({len(target_symbols)} 个币种)")
+                target_symbols = sorted(b_symbols)
+                logger.info(f"✅ Binance 高成交额监控列表 ({len(target_symbols)} 个币种)")
                 # Log first 10 for preview
                 logger.info(f"   示例: {', '.join(target_symbols[:10])}...")
             else:
-                logger.warning("❌ 未发现 OKX USDT 交易对，回退到默认币种。")
+                logger.warning("❌ 未在 Binance 发现满足成交额阈值的 USDT 交易对，回退到默认币种。")
         except Exception as e:
-            logger.error(f"OKX 币种扫描失败: {e}")
+            logger.error(f"Binance 币种扫描失败: {e}")
             logger.warning("回退到默认币种。")
 
     taker_analyzer = TakerFlowAnalyzer(window=50)
     multi_analyzer = MultiPlatformAnalyzer()
     whale_watcher = WhaleWatcher(threshold=Config.WHALE_THRESHOLD) # $200k
+    strategy = EntryExitStrategy()
+    
+    # 初始化通知服务
+    notification_service = None
+    if Config.ENABLE_DINGTALK or Config.ENABLE_WECHAT:
+        notification_service = NotificationService()
+        logger.info("✅ 通知服务已启用")
+        if Config.ENABLE_DINGTALK:
+            logger.info(f"  - 钉钉推送: 已启用")
+        if Config.ENABLE_WECHAT:
+            logger.info(f"  - 企业微信推送: 已启用")
+    else:
+        logger.info("ℹ️  通知服务未启用（可在 .env 中配置）")
 
+    # 排除配置的品种
+    target_symbols = [s for s in target_symbols if s not in Config.EXCLUDED_SYMBOLS]
+    
     try:
         while True:
             cycle_start = time.time()
             logger.info(f"=== 开始新一轮扫描 ({len(target_symbols)} 币种) ===")
             
             # Process symbols in chunks of 5 to control concurrency
-            chunk_size = 5
-            for i in range(0, len(target_symbols), chunk_size):
-                chunk = target_symbols[i:i + chunk_size]
-                await asyncio.gather(*[
-                    process_symbol(s, initialized, taker_analyzer, multi_analyzer, whale_watcher) 
-                    for s in chunk
-                ])
+            for i in range(0, len(target_symbols), 5):
+                chunk = target_symbols[i:i+5]
+                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service) for sym in chunk]
+                await asyncio.gather(*tasks)
                 # Small sleep between chunks to be nice to APIs
                 await asyncio.sleep(1)
 

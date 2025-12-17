@@ -31,7 +31,17 @@ class TakerFlowAnalyzer:
         else:
             ratio = float('inf') if total_buy > 0 else 0.0
             
+        # Extract Price Structure
+        current_price = valid_df['close'].iloc[-1] if not valid_df.empty else 0.0
+        # Support = Lowest Low in window
+        support_low = valid_df['low'].min() if not valid_df.empty else 0.0
+        # Resistance = Highest High in window
+        resistance_high = valid_df['high'].max() if not valid_df.empty else 0.0
+
         return {
             'cumulative_net_flow': cumulative_net_flow,
-            'buy_sell_ratio': ratio
+            'buy_sell_ratio': ratio,
+            'current_price': current_price,
+            'support_low': support_low,
+            'resistance_high': resistance_high
         }

@@ -393,3 +393,126 @@ class NotificationService:
             await self.send_dingtalk(text, at_all=False)
         if self.enable_wechat:
             await self.send_wechat(text)
+
+    async def send_volume_spike_alert(self, spike_data: Dict, symbol: str):
+        """
+        发送成交量暴增警报
+        """
+        # 即使只开启了钉钉或微信其中一个，也应该发送
+        if not (self.enable_dingtalk or self.enable_wechat):
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ratio = spike_data['ratio']
+        change = spike_data['price_change']
+        price = spike_data['current_price']
+        
+        emoji = "🔥" if ratio > 5 else "⚡️"
+        
+        message = f"""### {emoji} 成交量暴增警报
+        
+**币种**: **{symbol}**
+**放量倍数**: <font color='red'>**{ratio:.1f}x**</font> (近15m vs 5h均值)
+**15m涨幅**: <font color='red'>**+{change:.2f}%**</font>
+**当前价格**: ${price:,.4f}
+**触发时间**: {timestamp}
+
+---
+
+**分析**:
+短期内有大量资金涌入且推高价格，可能开启短线爆发趋势。
+
+---
+<font color='comment'>*Volume Spike Strategy*</font>
+"""
+        logger.info(f"📢 触发成交量暴增警报 [{symbol}]，推送通知...")
+        
+        if self.enable_dingtalk:
+            await self.send_dingtalk(message, at_all=False)
+            
+        if self.enable_wechat:
+            await self.send_wechat(message)
+
+    async def send_early_pump_alert(self, data: Dict, symbol: str):
+        """
+        发送主力拉盘初期警报 (A+级)
+        """
+        if not (self.enable_dingtalk or self.enable_wechat):
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        pct = data['pct_change']
+        vol = data['vol_ratio']
+        buy_ratio = data['buy_ratio'] * 100
+        price = data['price']
+        
+        message = f"""### 🚀 主力拉盘启动警报
+        
+**币种**: **{symbol}**
+**1分钟涨幅**: <font color='red'>**+{pct:.2f}%**</font>
+**瞬间量能**: <font color='red'>**{vol:.1f}x**</font> (vs 1h均值)
+**主动买入**: <font color='red'>**{buy_ratio:.0f}%**</font> (强力扫货)
+**当前价格**: ${price:,.4f}
+**触发时间**: {timestamp}
+
+---
+
+**分析**:
+监控到主力资金在**第1分钟**极速抢筹，价格快速脱离成本区，建议关注！
+
+---
+<font color='comment'>*Early Pump Detection*</font>
+"""
+        logger.critical(f"🚀 触发主力拉盘警报 [{symbol}]，立即推送！")
+        
+        # A+级信号，强制推送
+        if self.enable_dingtalk:
+            await self.send_dingtalk(message, at_all=True)
+            
+        if self.enable_wechat:
+            await self.send_wechat(message)
+
+    async def send_realtime_pump_alert(self, data: Dict):
+        """
+        发送实时拉盘警报 (WebSocket 实时监控)
+        """
+        if not (self.enable_dingtalk or self.enable_wechat):
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        symbol = data['symbol']
+        pct = data['change_pct']
+        vol = data['volume']
+        price = data['price']
+        is_closed = data['is_closed']
+        market_label = data.get('market_label', '现货')  # Default to spot if not provided
+        
+        status_emoji = "🔴" if is_closed else "⚡"
+        status_text = "已收盘" if is_closed else "实时"
+        
+        message = f"""### 🚀 实时拉盘警报 {status_emoji}
+        
+**币种**: **{symbol}** [{market_label}]
+**状态**: {status_text}
+**1分钟涨幅**: <font color='red'>**+{pct:.2f}%**</font>
+**成交额**: <font color='red'>**${vol:,.0f}**</font> USDT
+**当前价格**: ${price:,.4f}
+**触发时间**: {timestamp}
+
+---
+
+**分析**:
+WebSocket 实时监控捕获，币种在 1分钟内快速拉升，建议关注！
+
+---
+<font color='comment'>*Realtime WebSocket Monitor - {market_label}*</font>
+"""
+        logger.info(f"📢 触发实时拉盘警报 [{symbol} {market_label}]，推送通知...")
+        
+        # 实时信号，高优先级推送
+        if self.enable_dingtalk:
+            await self.send_dingtalk(message, at_all=True)
+            
+        if self.enable_wechat:
+            await self.send_wechat(message)
+

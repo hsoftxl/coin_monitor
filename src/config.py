@@ -1,73 +1,101 @@
-import os
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+"""
+配置文件 - 所有配置项都在此文件中直接设置
+如需修改配置，直接编辑本文件即可，无需使用 .env 文件
+"""
 
 class Config:
-    # Symbol to monitor (Default if Multi-Symbol disabled)
+    # ==================== 基础配置 ====================
+    # 默认监控币种（当 ENABLE_MULTI_SYMBOL=False 时使用）
     SYMBOL = "ETH/USDT"
     
-    # Enable Multi-Symbol Discovery
+    # 是否启用多币种扫描
     ENABLE_MULTI_SYMBOL = True
     
-    # Timeframe for alignment (e.g., '15m', '1h')
+    # K线时间周期
     TIMEFRAME = "1m"
     
-    # Whale Watch Threshold in USD
-    WHALE_THRESHOLD = 200000.0  # $200k
+    # 数据获取限制
+    LIMIT_KLINE = 300    # K线数量
+    LIMIT_TRADES = 1000  # 交易记录数量
     
-    # Data Fetch Limits
-    LIMIT_KLINE = 100
-    LIMIT_TRADES = 1000
+    # API 请求延迟
+    RATE_LIMIT_DELAY = 1.0  # 秒
     
-    # API Rates
-    RATE_LIMIT_DELAY = 1.0 # seconds
+    # 24小时成交额过滤（只监控成交额大于此值的币种）
+    MIN_24H_QUOTE_VOLUME = 500000  # 5M USDT
     
-    # 24h quote volume filter (USD)
-    MIN_24H_QUOTE_VOLUME = float(os.getenv("MIN_24H_QUOTE_VOLUME", "5000000"))
-    EXCLUDED_SYMBOLS = [s.strip() for s in os.getenv("EXCLUDED_SYMBOLS", "USDC/USDT,XUSD/USDT,USDE/USDT").split(",") if s.strip()]
-    ENABLE_STRATEGY = os.getenv("ENABLE_STRATEGY", "True").lower() == "true"
-    STRATEGY_MIN_TOTAL_FLOW = float(os.getenv("STRATEGY_MIN_TOTAL_FLOW", "10000000"))
-    STRATEGY_MIN_RATIO = float(os.getenv("STRATEGY_MIN_RATIO", "1.1"))
-    STRATEGY_MIN_INTERVAL_SEC = int(os.getenv("STRATEGY_MIN_INTERVAL_SEC", "900"))
-    STRATEGY_ATR_SL_MULT = float(os.getenv("STRATEGY_ATR_SL_MULT", "1.5"))
-    STRATEGY_ATR_TP_MULT = float(os.getenv("STRATEGY_ATR_TP_MULT", "2.0"))
-    STRATEGY_REQUIRE_MIDBAND = os.getenv("STRATEGY_REQUIRE_MIDBAND", "True").lower() == "true"
-    STRATEGY_MIN_CONSENSUS_BARS = int(os.getenv("STRATEGY_MIN_CONSENSUS_BARS", "2"))
-    ENABLE_PERSISTENCE = os.getenv("ENABLE_PERSISTENCE", "True").lower() == "true"
-    PERSIST_DB_PATH = os.getenv("PERSIST_DB_PATH", "data/signals.db")
-    STRATEGY_RISK_USD = float(os.getenv("STRATEGY_RISK_USD", "1000"))
-    STRATEGY_MAX_NOTIONAL_USD = float(os.getenv("STRATEGY_MAX_NOTIONAL_USD", "10000"))
+    # 排除的交易对
+    EXCLUDED_SYMBOLS = ["USDC/USDT", "XUSD/USDT", "USDE/USDT"]
     
-    # Exchange Enabled Status
+    # 日志级别
+    LOG_LEVEL = "INFO"
+    
+    # ==================== 交易所配置 ====================
     EXCHANGES = {
         "binance": True,
         "okx": True,
         "bybit": True,
         "coinbase": True
     }
-
-    # Logging
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     
-    # Notification Settings
-    ENABLE_DINGTALK = os.getenv("ENABLE_DINGTALK", "True").lower() == "true"
-    DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=36a7d64cdeaf611023d1ed25bd5f66f8df242632ae872b6769ce59c74235846b")
-    DINGTALK_SECRET = os.getenv("DINGTALK_SECRET", "SEC10ac09242c4143447d588749090e334ba50e29f30b717c241c41ec86edfc6bfe")  # 可选：加签密钥
+    # ==================== 通知配置 ====================
+    # 钉钉通知
+    ENABLE_DINGTALK = True  # 改这里：True启用 / False禁用
+    DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=36a7d64cdeaf611023d1ed25bd5f66f8df242632ae872b6769ce59c74235846b"
+    DINGTALK_SECRET = "SEC10ac09242c4143447d588749090e334ba50e29f30b717c241c41ec86edfc6bfe"
     
-    ENABLE_WECHAT = os.getenv("ENABLE_WECHAT", "False").lower() == "true"
-    WECHAT_WEBHOOK = os.getenv("WECHAT_WEBHOOK", "")
+    # 企业微信通知
+    ENABLE_WECHAT = False  # 改这里：True启用 / False禁用
+    WECHAT_WEBHOOK = ""  # 填写你的企业微信机器人 Webhook
     
     # 通知等级阈值（只推送这些等级的信号）
     NOTIFY_GRADES = ["A+", "A"]
     
-    # 巨鲸通知配置
-    ENABLE_WHALE_NOTIFY = True
-    WHALE_NOTIFY_THRESHOLD = 500000.0  # 只推送 >= $500k 的巨鲸交易
+    # ==================== 巨鲸监控配置 ====================
+    WHALE_THRESHOLD = 200000.0  # 监测阈值：$200k
+    ENABLE_WHALE_NOTIFY = True  # 是否推送巨鲸通知
+    WHALE_NOTIFY_THRESHOLD = 500000.0  # 推送阈值：>= $500k
     
-    # 市场共识通知
-    ENABLE_CONSENSUS_NOTIFY = True  # 推送强力看涨/看跌共识
+    # ==================== 市场共识通知 ====================
+    ENABLE_CONSENSUS_NOTIFY = False  # 推送强力看涨/看跌共识（已禁用）
     
-    # Operations
-    HEALTH_CHECK_INTERVAL = 60 # seconds
+    # ==================== Volume Spike 策略配置 ====================
+    SPIKE_VOL_FACTOR = 3.0           # 成交量倍数（当前15m vs 5h均值）
+    SPIKE_COOLDOWN_MINUTES = 30      # 冷却时间（分钟）
+    SPIKE_MIN_PRICE_CHANGE = 0.5     # 最小涨幅 %
+    
+    # ==================== Early Pump 策略配置 ====================
+    EARLY_PUMP_MIN_CHANGE = 1.0      # 最小涨幅 %（1分钟内）
+    EARLY_PUMP_VOL_FACTOR = 5.0      # 成交量倍数（vs 1h均值）
+    EARLY_PUMP_BUY_RATIO = 0.6       # 主动买入占比 > 60%
+    EARLY_PUMP_COOLDOWN = 10         # 冷却时间（分钟）
+    
+    # ==================== 实时 WebSocket 监控配置 ====================
+    ENABLE_REALTIME_MONITOR = True         # 是否启用 WebSocket 实时监控
+    
+    # 市场类型配置
+    ENABLE_SPOT_MARKET = True              # 监控现货市场
+    ENABLE_FUTURES_MARKET = True           # 监控永续合约市场
+    
+    REALTIME_PUMP_THRESHOLD = 1.0          # 涨幅阈值 %
+    REALTIME_MIN_VOLUME = 100000           # 最小成交额 USDT
+    REALTIME_BLACKLIST = ["UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT", "BUSDUSDT", "USDCUSDT"]
+    
+    # ==================== 交易策略配置 ====================
+    ENABLE_STRATEGY = True
+    STRATEGY_MIN_TOTAL_FLOW = 10000000     # 最小总资金流（USDT）
+    STRATEGY_MIN_RATIO = 1.1               # 最小买卖比
+    STRATEGY_MIN_INTERVAL_SEC = 900        # 最小信号间隔（秒）
+    STRATEGY_ATR_SL_MULT = 1.5             # ATR止损倍数
+    STRATEGY_ATR_TP_MULT = 2.0             # ATR止盈倍数
+    STRATEGY_REQUIRE_MIDBAND = True        # 是否要求在中轨附近
+    STRATEGY_MIN_CONSENSUS_BARS = 2        # 最小共识K线数
+    STRATEGY_RISK_USD = 1000               # 单次风险金额
+    STRATEGY_MAX_NOTIONAL_USD = 10000      # 最大名义金额
+    
+    # ==================== 数据持久化配置 ====================
+    ENABLE_PERSISTENCE = True
+    PERSIST_DB_PATH = "data/signals.db"
+    
+    # ==================== 运维配置 ====================
+    HEALTH_CHECK_INTERVAL = 60  # 健康检查间隔（秒）

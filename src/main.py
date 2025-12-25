@@ -12,12 +12,15 @@ from src.processors.data_processor import DataProcessor
 from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
 from src.analyzers.whale_watcher import WhaleWatcher
+from src.analyzers.volume_spike import VolumeSpikeAnalyzer
+from src.analyzers.early_pump import EarlyPumpAnalyzer
 from src.utils.discovery import SymbolDiscovery
 from src.services.notification import NotificationService
+from src.services.realtime_monitor import RealtimeMonitor
 from src.strategies.entry_exit import EntryExitStrategy
 from src.storage.persistence import Persistence
 
-async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service=None, persistence=None):
+async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, strategy, notification_service=None, persistence=None):
     """
     Process a single symbol across all exchanges.
     """
@@ -71,6 +74,20 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
         df = DataProcessor.process_candles(res)
         metrics = taker_analyzer.analyze(df)
         platform_metrics[name] = metrics
+        
+        # Volume Spike Analysis
+        spike = vol_spike_analyzer.analyze(df, symbol)
+        if spike:
+             logger.warning(f"🔥 [{symbol}] 成交量暴增: {spike['ratio']:.1f}x (涨幅 {spike['price_change']:.2f}%)")
+             if notification_service:
+                 await notification_service.send_volume_spike_alert(spike, symbol)
+                 
+        # Early Pump Analysis (High Priority)
+        pump = early_pump_analyzer.analyze(df, symbol)
+        if pump:
+             logger.critical(f"{pump['desc']}")
+             if notification_service:
+                 await notification_service.send_early_pump_alert(pump, symbol)
         
     if valid_data_count < 2:
         return # Skip if not enough data for consensus
@@ -202,6 +219,8 @@ async def main():
             logger.warning("回退到默认币种。")
 
     taker_analyzer = TakerFlowAnalyzer(window=50)
+    vol_spike_analyzer = VolumeSpikeAnalyzer()
+    early_pump_analyzer = EarlyPumpAnalyzer()
     multi_analyzer = MultiPlatformAnalyzer()
     whale_watcher = WhaleWatcher(threshold=Config.WHALE_THRESHOLD) # $200k
     strategy = EntryExitStrategy()
@@ -218,6 +237,14 @@ async def main():
             logger.info(f"  - 企业微信推送: 已启用")
     else:
         logger.info("ℹ️  通知服务未启用（可在 .env 中配置）")
+    
+    # 启动实时 WebSocket 监控（后台任务）
+    realtime_task = None
+    if Config.ENABLE_REALTIME_MONITOR:
+        logger.info("🚀 启动实时 WebSocket 监控...")
+        realtime_monitor = RealtimeMonitor(notification_service=notification_service)
+        realtime_task = asyncio.create_task(realtime_monitor.start())
+        logger.info("✅ 实时监控已在后台运行")
 
     # 排除配置的品种
     target_symbols = [s for s in target_symbols if s not in Config.EXCLUDED_SYMBOLS]
@@ -230,7 +257,7 @@ async def main():
             # Process symbols in chunks of 5 to control concurrency
             for i in range(0, len(target_symbols), 5):
                 chunk = target_symbols[i:i+5]
-                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, strategy, notification_service, persistence) for sym in chunk]
+                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, strategy, notification_service, persistence) for sym in chunk]
                 await asyncio.gather(*tasks)
                 # Small sleep between chunks to be nice to APIs
                 await asyncio.sleep(1)

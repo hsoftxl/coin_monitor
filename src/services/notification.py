@@ -472,6 +472,44 @@ class NotificationService:
         if self.enable_wechat:
             await self.send_wechat(message)
 
+    async def send_panic_dump_alert(self, data: Dict, symbol: str):
+        """
+        发送主力暴力出货警报 (Panic Dump)
+        """
+        if not (self.enable_dingtalk or self.enable_wechat):
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        pct = data['pct_change'] # Positive value representing drop
+        vol = data['vol_ratio']
+        sell_ratio = data['sell_ratio'] * 100
+        price = data['price']
+        
+        message = f"""### 📉 主力暴力出货警报
+        
+**币种**: **{symbol}**
+**1分钟跌幅**: <font color='green'>**-{pct:.2f}%**</font>
+**瞬间量能**: <font color='green'>**{vol:.1f}x**</font> (vs 1h均值)
+**主动卖出**: <font color='green'>**{sell_ratio:.0f}%**</font> (恐慌抛售)
+**当前价格**: ${price:,.4f}
+**触发时间**: {timestamp}
+
+---
+
+**分析**:
+监控到主力资金在**第1分钟**集中抛售，价格快速下杀，谨防踩踏风险！
+
+---
+<font color='comment'>*Panic Dump Detection*</font>
+"""
+        logger.critical(f"📉 触发主力出货警报 [{symbol}]，立即推送！")
+        
+        if self.enable_dingtalk:
+            await self.send_dingtalk(message, at_all=True)
+            
+        if self.enable_wechat:
+            await self.send_wechat(message)
+
     async def send_realtime_pump_alert(self, data: Dict):
         """
         发送实时拉盘警报 (WebSocket 实时监控)

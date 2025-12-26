@@ -15,13 +15,14 @@ from src.analyzers.whale_watcher import WhaleWatcher
 from src.analyzers.volume_spike import VolumeSpikeAnalyzer
 from src.analyzers.spot_futures_analyzer import SpotFuturesAnalyzer
 from src.analyzers.early_pump import EarlyPumpAnalyzer
+from src.analyzers.panic_dump import PanicDumpAnalyzer
 from src.utils.discovery import SymbolDiscovery
 from src.services.notification import NotificationService
 from src.services.realtime_monitor import RealtimeMonitor
 from src.strategies.entry_exit import EntryExitStrategy
 from src.storage.persistence import Persistence
 
-async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, sf_analyzer, strategy, notification_service=None, persistence=None):
+async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, sf_analyzer, strategy, notification_service=None, persistence=None):
     """
     Process a single symbol across all exchanges.
     """
@@ -133,6 +134,19 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
              logger.critical(f"[{symbol}] {pump['desc']}")
              if notification_service:
                  await notification_service.send_early_pump_alert(pump, symbol)
+
+        # Panic Dump Analysis
+        dump = panic_dump_analyzer.analyze(
+            df,
+            symbol,
+            df_5m=df_5m_data,
+            df_1h=df_1h_data,
+            sf_strength=sf_strength
+        )
+        if dump:
+             logger.critical(f"[{symbol}] {dump['desc']}")
+             if notification_service:
+                 await notification_service.send_panic_dump_alert(dump, symbol)
         
     if valid_data_count < 2:
         return # Skip if not enough data for consensus
@@ -167,7 +181,7 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
         await notification_service.send_consensus_alert(consensus, platform_metrics, symbol)
 
     # 4. Signals
-    signals = multi_analyzer.analyze_signals(platform_metrics, symbol=symbol)
+    signals = multi_analyzer.analyze_signals(platform_metrics, symbol=symbol, df_5m=df_5m_data, df_1h=df_1h_data)
     for signal in signals:
         logger.critical(f"🚨 [{symbol}] 信号触发 [{signal['grade']}]: {signal['type']} - {signal['desc']}")
         
@@ -178,7 +192,7 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
             persistence.save_signal(signal, platform_metrics, symbol)
 
     # 4.1 Strategy
-    rec = strategy.evaluate(platform_metrics, consensus, signals, symbol)
+    rec = strategy.evaluate(platform_metrics, consensus, signals, symbol, df_5m=df_5m_data, df_1h=df_1h_data)
     pos = strategy.compute_position(rec) if rec.get('action') else {}
     rec.update(pos)
     if rec.get('action'):
@@ -266,6 +280,7 @@ async def main():
     taker_analyzer = TakerFlowAnalyzer(window=50)
     vol_spike_analyzer = VolumeSpikeAnalyzer()
     early_pump_analyzer = EarlyPumpAnalyzer()
+    panic_dump_analyzer = PanicDumpAnalyzer()
     multi_analyzer = MultiPlatformAnalyzer()
     sf_analyzer = SpotFuturesAnalyzer()  # Spot-Futures correlation analyzer
     whale_watcher = WhaleWatcher(threshold=Config.WHALE_THRESHOLD) # $200k
@@ -304,7 +319,7 @@ async def main():
             # Process symbols in chunks of 5 to control concurrency
             for i in range(0, len(target_symbols), 5):
                 chunk = target_symbols[i:i+5]
-                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, sf_analyzer, strategy, notification_service, persistence) for sym in chunk]
+                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, sf_analyzer, strategy, notification_service, persistence) for sym in chunk]
                 await asyncio.gather(*tasks)
 
                 # Small sleep between chunks to be nice to APIs

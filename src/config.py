@@ -70,6 +70,25 @@ class Config:
     EARLY_PUMP_BUY_RATIO = 0.6       # 主动买入占比 > 60%
     EARLY_PUMP_COOLDOWN = 10         # 冷却时间（分钟）
     
+    # ==================== 多时间框架配置 ====================
+    ENABLE_MULTI_TIMEFRAME = True        # 启用多时间框架确认
+    MTF_5M_TREND_BARS = 3                # 5分钟趋势确认K线数
+    MTF_1H_MA_PERIOD = 20                # 1小时MA周期
+    
+    # ==================== 波动率自适应配置 ====================
+    ENABLE_ADAPTIVE_THRESHOLD = True      # 启用波动率自适应
+    ATR_PERIOD = 14                       # ATR计算周期
+    VOLATILITY_LOW_THRESHOLD = 2.0        # 低波动阈值 %
+    VOLATILITY_HIGH_THRESHOLD = 5.0       # 高波动阈值 %
+    PUMP_THRESHOLD_LOW_VOL = 0.8          # 低波动币种涨幅阈值
+    PUMP_THRESHOLD_NORMAL_VOL = 1.0       # 正常波动涨幅阈值
+    PUMP_THRESHOLD_HIGH_VOL = 1.5         # 高波动币种涨幅阈值
+    
+    # ==================== 现货-合约联动配置 ====================
+    ENABLE_SPOT_FUTURES_CORRELATION = True  # 启用现货合约联动
+    SF_DIVERGENCE_THRESHOLD = 0.5           # 合约领涨判定差值 %
+    SF_CORRELATION_THRESHOLD = 0.3          # 相关性阈值 %
+    
     # ==================== 实时 WebSocket 监控配置 ====================
     ENABLE_REALTIME_MONITOR = True         # 是否启用 WebSocket 实时监控
     

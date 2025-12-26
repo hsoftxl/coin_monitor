@@ -56,7 +56,23 @@ class ExchangeConnector(ABC):
         target_symbol = self.resolve_symbol(symbol or self.symbol)
         return await self._retry_request(self.exchange.fetch_ohlcv, target_symbol, self.timeframe, limit=limit)
 
+    async def fetch_candles_timeframe(self, symbol: str = None, timeframe: str = '1m', limit: int = 100) -> List[Any]:
+        """
+        Fetches OHLCV data for a specific timeframe (for multi-timeframe analysis).
+        
+        Args:
+            symbol: Trading pair symbol
+            timeframe: Timeframe string ('1m', '5m', '1h', etc.)
+            limit: Number of candles to fetch
+            
+        Returns:
+            List of OHLCV candles
+        """
+        target_symbol = self.resolve_symbol(symbol or self.symbol)
+        return await self._retry_request(self.exchange.fetch_ohlcv, target_symbol, timeframe, limit=limit)
+
     async def fetch_trades(self, symbol: str = None, limit: int = Config.LIMIT_TRADES) -> List[Dict]:
+
         """
         Fetches recent trades with retry logic.
         """

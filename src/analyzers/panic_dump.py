@@ -25,10 +25,12 @@ class PanicDumpAnalyzer:
     """
     def __init__(self):
         self.cooldowns: Dict[str, float] = {}
-        self.cooldown_sec = Config.EARLY_PUMP_COOLDOWN * 60 # Reuse same cooldown config or new one?
-        self.min_drop = Config.EARLY_PUMP_MIN_CHANGE # Reuse pump threshold for dump? Usually dumps are sharper.
+        self.cooldown_sec = Config.EARLY_PUMP_COOLDOWN * 60
+        # Use config for drop threshold if available, else derive or default
+        # Assuming we might want a separate config, but reusing MIN_CHANGE is okay for now or use hardcoded default
+        self.min_drop = getattr(Config, 'PANIC_DUMP_MIN_DROP', 1.0) 
         self.vol_factor = Config.EARLY_PUMP_VOL_FACTOR
-        self.sell_ratio_threshold = 0.6 # Sell dominance > 60%
+        self.sell_ratio_threshold = getattr(Config, 'PANIC_DUMP_SELL_RATIO', 0.6)
         
         # Multi-timeframe settings
         self.enable_mtf = Config.ENABLE_MULTI_TIMEFRAME

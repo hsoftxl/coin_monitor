@@ -37,40 +37,34 @@ class MultiPlatformAnalyzer:
                 trend_1h = "BEARISH"
 
         # 1. Global Sync Bullish (A+)
-        # Logic: All 4 Positive Flow & Ratio > 1.15
+        # Logic: All valid platforms Positive Flow & Ratio > 1.15
         all_positive = True
         all_strong_buy = True
-        count_valid = 0
+        count_valid = len(platform_metrics)
         
         for p, m in platform_metrics.items():
             if m.get('cumulative_net_flow', 0) <= 0:
                 all_positive = False
             if m.get('buy_sell_ratio', 0) <= 1.15:
                 all_strong_buy = False
-            count_valid += 1
             
-        if count_valid >= 3 and all_positive and all_strong_buy: # Relaxed slightly for robustness or strict 4? Design says "All 4".
-             # If we have 4 platforms, check 4. If one down, maybe 3? 
-             # Design: "All 4".
-             if count_valid == 4:
-                 # Check Trend Alignment
-                 is_aligned = True
-                 if trend_5m == "BEARISH" or trend_1h == "BEARISH":
-                     is_aligned = False # Contra-trend signal
-                 
-                 if is_aligned:
+        # Require majority valid (>=3) and All of them are positive
+        if count_valid >= 3 and all_positive and all_strong_buy: 
+             # Check Trend Alignment
+             is_aligned = True
+             if trend_5m == "BEARISH" or trend_1h == "BEARISH":
+                 is_aligned = False # Contra-trend signal
+             
+             if is_aligned:
                      signals.append({
                          'symbol': symbol,
                          'type': '全球协同看涨 (Global Sync Bullish)',
-                         'grade': 'A+',
+                         'grade': 'B+',
                          'desc': '主力全平台吸筹，市场做多情绪一致 (多周期共振)。'
                      })
-                 else:
-                     # Downgrade or skip?
-                     pass # Strict A+ requires trend alignment
 
         # 2. Global Sync Bearish (Global Sync Bearish) -> A+
-        # Logic: All 4 Negative Flow & Buy/Sell Ratio < 0.85
+        # Logic: All valid platforms Negative Flow & Buy/Sell Ratio < 0.85
         all_negative = True
         all_strong_sell = True
         
@@ -81,17 +75,16 @@ class MultiPlatformAnalyzer:
                 all_strong_sell = False
                 
         if count_valid >= 3 and all_negative and all_strong_sell:
-             if count_valid == 4:
-                 # Check Trend Alignment (Bearish)
-                 is_aligned = True
-                 if trend_5m == "BULLISH" or trend_1h == "BULLISH":
-                     is_aligned = False
-                     
-                 if is_aligned:
+             # Check Trend Alignment (Bearish)
+             is_aligned = True
+             if trend_5m == "BULLISH" or trend_1h == "BULLISH":
+                 is_aligned = False
+                 
+             if is_aligned:
                      signals.append({
                          'symbol': symbol,
                          'type': '全球协同出货 (Global Sync Bearish)',
-                         'grade': 'A+',
+                         'grade': 'B+',
                          'desc': '主力全平台出货，市场做空情绪一致 (多周期共振)。'
                      })
 

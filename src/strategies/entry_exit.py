@@ -58,14 +58,24 @@ class EntryExitStrategy:
         if last_ts and now - last_ts < self.min_interval_sec:
             return {'action': None, 'symbol': symbol}
             
-        streak = self.consensus_streak.get(symbol, 0)
-        if bullish_consensus:
-            streak += 1
-        elif bearish_consensus:
-            streak += 1
+        # Update Consensus Streak with Direction Reset
+        streak_data = self.consensus_streak.get(symbol, {'count': 0, 'direction': 'NEUTRAL'})
+        current_direction = 'NEUTRAL'
+        if bullish_consensus: current_direction = 'BULLISH'
+        elif bearish_consensus: current_direction = 'BEARISH'
+        
+        if current_direction != 'NEUTRAL':
+            if current_direction == streak_data['direction']:
+                streak_data['count'] += 1
+            else:
+                streak_data['count'] = 1
+                streak_data['direction'] = current_direction
         else:
-            streak = 0
-        self.consensus_streak[symbol] = streak
+            streak_data['count'] = 0
+            streak_data['direction'] = 'NEUTRAL'
+            
+        self.consensus_streak[symbol] = streak_data
+        streak = streak_data['count']
         
         midband_ok = True
         if self.require_midband and support > 0 and resistance > 0:

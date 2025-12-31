@@ -1,7 +1,7 @@
 
 import pandas as pd
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 from src.config import Config
 from src.utils.logger import logger
 from src.utils.indicators import (
@@ -16,15 +16,10 @@ class EarlyPumpAnalyzer:
     Analyzes the 'initial stage' of a pump using 1-minute data specifically.
     
     Enhanced with:
-    1. Multi-timeframe confirmation (5m trend + 1h MA)
+    1. Multi-timeframe confirmation
     2. Adaptive volatility threshold
-    3. Spot-Futures correlation support
-    
-    Focuses on:
-    1. Rapid price acceleration (adaptive % based on volatility)
-    2. Taker Buy dominance (> 60%)
-    3. Volume explosion (> 5x 1h average)
-    4. Multi-timeframe trend confirmation
+    3. Spot-Futures correlation
+    4. Whale Confirmation & Strategy Targets
     """
     def __init__(self):
         self.cooldowns: Dict[str, float] = {}
@@ -118,7 +113,8 @@ class EarlyPumpAnalyzer:
         symbol: str,
         df_5m: Optional[pd.DataFrame] = None,
         df_1h: Optional[pd.DataFrame] = None,
-        sf_strength: Optional[str] = None
+        sf_strength: Optional[str] = None,
+        whales: Optional[List[Dict]] = None
     ) -> Optional[Dict]:
         """
         Detects early pump signals with enhanced multi-timeframe and volatility analysis.
@@ -128,7 +124,8 @@ class EarlyPumpAnalyzer:
             symbol: Trading symbol
             df_5m: Optional 5m candle data for trend confirmation
             df_1h: Optional 1h candle data for MA confirmation
-            sf_strength: Optional spot-futures correlation strength ('HIGH', 'MEDIUM', 'LOW')
+            sf_strength: Optional spot-futures correlation strength
+            whales: Optional list of recent whale trades
         """
         if df.empty or len(df) < (self.history_window + 2):
             return None
@@ -210,9 +207,39 @@ class EarlyPumpAnalyzer:
             if sf_tag:
                 desc_parts.append(sf_tag)
         
+        # 5. Whale Confirmation
+        whale_bonus = False
+        if whales:
+            # Check for recent Buy whales (last 3 minutes approx)
+            # Simple check: any buy whale in the passed list?
+            # Assuming 'whales' passed are relevant to current time
+            buy_whales = [w for w in whales if w['side'].upper() == 'BUY']
+            if buy_whales:
+                whale_bonus = True
+                total_whale_vol = sum(w['cost'] for w in buy_whales)
+                desc_parts.append(f"🐋主力抢筹${total_whale_vol/1000:.0f}k")
+
         # Determine grade based on all factors
-        grade = self._calculate_grade(pct_change, vol_ratio, buy_ratio, vol_level, mtf_confirmed, sf_strength)
+        grade = self._calculate_grade(pct_change, vol_ratio, buy_ratio, vol_level, mtf_confirmed, sf_strength, whale_bonus)
         
+        # 6. Calculate Strategy Targets
+        # Entry: Close
+        # SL: Open (Low of the pump candle)
+        # TP: Entry + (Entry - SL) * 2 (Risk Reward 1:2)
+        entry_price = close_price
+        stop_loss = open_price * 0.999 # Slightly below open
+        risk = entry_price - stop_loss
+        if risk <= 0: risk = entry_price * 0.005 # Fallback risk
+        take_profit = entry_price + (risk * 2.0)
+        
+        strategy = {
+            'action': 'LONG',
+            'entry': entry_price,
+            'sl': stop_loss,
+            'tp': take_profit,
+            'risk_reward': 2.0
+        }
+
         return {
             'type': 'EARLY_PUMP',
             'grade': grade,
@@ -223,7 +250,8 @@ class EarlyPumpAnalyzer:
             'price': close_price,
             'volatility_level': vol_level,
             'mtf_confirmed': mtf_confirmed,
-            'sf_strength': sf_strength or 'N/A'
+            'sf_strength': sf_strength or 'N/A',
+            'strategy': strategy
         }
 
     def _calculate_grade(
@@ -233,7 +261,8 @@ class EarlyPumpAnalyzer:
         buy_ratio: float,
         vol_level: str,
         mtf_confirmed: bool,
-        sf_strength: Optional[str]
+        sf_strength: Optional[str],
+        whale_bonus: bool = False
     ) -> str:
         """
         Calculate signal grade based on multiple factors.
@@ -274,6 +303,10 @@ class EarlyPumpAnalyzer:
             score += 2
         elif sf_strength == 'MEDIUM':
             score += 1
+            
+        # Whale bonus (2 points)
+        if whale_bonus:
+            score += 2
         
         # Volatility penalty for HIGH volatility
         if vol_level == 'HIGH':

@@ -121,14 +121,22 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
              if notification_service:
                  await notification_service.send_volume_spike_alert(spike, symbol)
                  
-        # Early Pump Analysis (Enhanced with MTF + SF correlation)
+        # Whale Analysis (for Confirmation)
+        current_whales = []
+        if i < len(trade_results):
+            t_res = trade_results[i]
+            if isinstance(t_res, list) and t_res:
+                current_whales = whale_watcher.check_trades(t_res)
+
+        # Early Pump Analysis (Enhanced with MTF + SF correlation + Whales)
         sf_strength = sf_correlation['strength'] if sf_correlation else None
         pump = early_pump_analyzer.analyze(
             df, 
             symbol,
             df_5m=df_5m_data,
             df_1h=df_1h_data,
-            sf_strength=sf_strength
+            sf_strength=sf_strength,
+            whales=current_whales
         )
         if pump:
              logger.critical(f"[{symbol}] {pump['desc']}")
@@ -141,7 +149,8 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
             symbol,
             df_5m=df_5m_data,
             df_1h=df_1h_data,
-            sf_strength=sf_strength
+            sf_strength=sf_strength,
+            whales=current_whales
         )
         if dump:
              logger.critical(f"[{symbol}] {dump['desc']}")

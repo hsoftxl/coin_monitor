@@ -459,6 +459,12 @@ class NotificationService:
 
 **分析**:
 监控到主力资金在**第1分钟**极速抢筹，价格快速脱离成本区，建议关注！
+{f'''
+**策略建议**:
+**动作**: {data['strategy']['action']} (盈亏比 {data['strategy']['risk_reward']}:1)
+**买入**: ${data['strategy']['entry']:.4f}
+**止损**: ${data['strategy']['sl']:.4f}
+**止盈**: ${data['strategy']['tp']:.4f}''' if 'strategy' in data else ''}
 
 ---
 <font color='comment'>*Early Pump Detection*</font>
@@ -498,6 +504,12 @@ class NotificationService:
 
 **分析**:
 监控到主力资金在**第1分钟**集中抛售，价格快速下杀，谨防踩踏风险！
+{f'''
+**策略建议**:
+**动作**: {data['strategy']['action']} (盈亏比 {data['strategy']['risk_reward']}:1)
+**卖出**: ${data['strategy']['entry']:.4f}
+**止损**: ${data['strategy']['sl']:.4f}
+**止盈**: ${data['strategy']['tp']:.4f}''' if 'strategy' in data else ''}
 
 ---
 <font color='comment'>*Panic Dump Detection*</font>

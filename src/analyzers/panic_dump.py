@@ -1,7 +1,7 @@
 
 import pandas as pd
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 from src.config import Config
 from src.utils.logger import logger
 from src.utils.indicators import (
@@ -22,6 +22,7 @@ class PanicDumpAnalyzer:
     2. Taker Sell dominance (> 60% or Buy/Sell Ratio < 0.4)
     3. Volume explosion (> 5x 1h average)
     4. Multi-timeframe trend confirmation (Downtrend)
+    5. Whale Confirmation & Strategy Targets
     """
     def __init__(self):
         self.cooldowns: Dict[str, float] = {}
@@ -114,7 +115,8 @@ class PanicDumpAnalyzer:
         symbol: str,
         df_5m: Optional[pd.DataFrame] = None,
         df_1h: Optional[pd.DataFrame] = None,
-        sf_strength: Optional[str] = None
+        sf_strength: Optional[str] = None,
+        whales: Optional[List[Dict]] = None
     ) -> Optional[Dict]:
         """
         Detects panic dump signals.
@@ -191,10 +193,39 @@ class PanicDumpAnalyzer:
         if mtf_msg:
             desc_parts.append(mtf_msg)
             
+        # Whale Confirmation
+        whale_bonus = False
+        if whales:
+            sell_whales = [w for w in whales if w['side'].upper() == 'SELL']
+            if sell_whales:
+                whale_bonus = True
+                total_whale_vol = sum(w['cost'] for w in sell_whales)
+                desc_parts.append(f"🐋主力出逃${total_whale_vol/1000:.0f}k")
+            
         # Grade
         grade = 'A' # Default A for confirmed dump
         if drop_pct > 2.0 and vol_ratio > 10:
             grade = 'A+'
+        if whale_bonus:
+            grade = 'A+' # Upgrade to A+ if whale confirmed
+        
+        # Calculate Strategy Targets (Short)
+        # Entry: Close
+        # SL: Open (High of the dump candle)
+        # TP: Entry - (SL - Entry) * 2 (Risk Reward 1:2)
+        entry_price = close_price
+        stop_loss = open_price * 1.001 # Slightly above open
+        risk = stop_loss - entry_price
+        if risk <= 0: risk = entry_price * 0.005 # Fallback risk
+        take_profit = entry_price - (risk * 2.0)
+        
+        strategy = {
+            'action': 'SHORT',
+            'entry': entry_price,
+            'sl': stop_loss,
+            'tp': take_profit,
+            'risk_reward': 2.0
+        }
         
         return {
             'type': 'PANIC_DUMP',
@@ -205,5 +236,6 @@ class PanicDumpAnalyzer:
             'sell_ratio': sell_ratio,
             'price': close_price,
             'volatility_level': vol_level,
-            'mtf_confirmed': mtf_confirmed
+            'mtf_confirmed': mtf_confirmed,
+            'strategy': strategy
         }

@@ -11,8 +11,8 @@ class Config:
     # 是否启用多币种扫描
     ENABLE_MULTI_SYMBOL = True
     
-    # K线时间周期 (Base Timeframe - 1m for Early Pump)
-    TIMEFRAME = "1m" 
+    # K线时间周期 (优化为5m降低噪音)
+    TIMEFRAME = "5m" 
     
     # 市场类型: 'spot' (现货) 或 'future' (U本位合约)
     MARKET_TYPE = "future"
@@ -21,8 +21,8 @@ class Config:
     # 'swap': 永续合约 (USDT-M)
     BINANCE_FUTURE_TYPE = 'future' # ccxt property 'defaultType' 
     
-    # 共振时间周期 (Resonance Timeframe)
-    MTF_RES_TIMEFRAME = "15m"
+    # 共振时间周期 (优化为1h提高可靠性)
+    MTF_RES_TIMEFRAME = "1h"
     
     # 数据获取限制
     LIMIT_KLINE = 300    # K线数量
@@ -32,7 +32,7 @@ class Config:
     RATE_LIMIT_DELAY = 1.0  # 秒
     
     # 24小时成交额过滤（只监控成交额大于此值的币种）
-    MIN_24H_QUOTE_VOLUME = 500000  # 5M USDT
+    MIN_24H_QUOTE_VOLUME = 10000000  # 10M USDT
     
     # 排除的交易对
     EXCLUDED_SYMBOLS = ["USDC/USDT", "XUSD/USDT", "USDE/USDT"]
@@ -43,7 +43,7 @@ class Config:
     # ==================== 交易所配置 ====================
     EXCHANGES = {
         "binance": True,
-        "okx": False,
+        "okx": True,      # ✅ 开启多平台验证
         "bybit": False,
         "coinbase": False
     }
@@ -128,3 +128,17 @@ class Config:
     
     # ==================== 运维配置 ====================
     HEALTH_CHECK_INTERVAL = 60  # 健康检查间隔（秒）
+    
+    # ==================== 仓位管理配置 (P0新增) ====================
+    ACCOUNT_BALANCE = 10000.0          # 账户余额（USDT）- 必须设置为真实值
+    RISK_PERCENTAGE = 2.0              # 单笔风险（账户%）
+    MAX_POSITIONS = 5                  # 最大持仓数
+    MAX_POSITION_NOTIONAL = 2000.0     # 单个仓位最大名义价值（USDT）
+    
+    # ==================== 做空配置 (P1新增) ====================
+    ENABLE_SHORT_TRADING = True        # 启用做空策略
+    SHORT_ONLY_IN_BEAR = True          # 仅在熊市做空（需要市场环境判断）
+    
+    # ==================== 多平台共识配置 (P0新增) ====================
+    MIN_EXCHANGE_CONSENSUS = 2         # 至少需要N个交易所确认
+    ENABLE_SINGLE_PLATFORM_TRAP_DETECTION = True  # 启用单平台诱多检测

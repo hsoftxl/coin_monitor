@@ -36,8 +36,8 @@ class EarlyPumpAnalyzer:
         self.enable_adaptive = Config.ENABLE_ADAPTIVE_THRESHOLD
         self.atr_period = Config.ATR_PERIOD
         
-        # Lookback for volume average (1 hour)
-        self.history_window = 60
+        # Lookback for volume average (调整为20根5m = 100分钟)
+        self.history_window = 20
 
     def _get_adaptive_threshold(self, df: pd.DataFrame, current_price: float) -> Tuple[float, str]:
         """
@@ -210,22 +210,41 @@ class EarlyPumpAnalyzer:
         # Determine grade based on all factors
         grade = self._calculate_grade(pct_change, vol_ratio, buy_ratio, vol_level, mtf_confirmed, sf_strength, whale_bonus)
         
-        # 6. Calculate Strategy Targets
-        # Entry: Close
-        # SL: Open (Low of the pump candle)
-        # TP: Entry + (Entry - SL) * 2 (Risk Reward 1:2)
+        # 6. Calculate Strategy Targets with Dynamic ATR-based Stop Loss
         entry_price = close_price
-        stop_loss = open_price * 0.999 # Slightly below open
+        
+        # 动态止损：基于ATR (避免过紧止损)
+        atr = calculate_atr_percentage(df, self.atr_period)
+        
+        if atr and atr > 0:
+            # ATR * 1.5 作为止损距离，限制在 1%-3% 之间
+            sl_distance_pct = max(1.0, min(3.0, atr * 1.5))
+        else:
+            # 降级方案：根据波动率等级设定固定止损
+            sl_map = {'LOW': 1.0, 'NORMAL': 1.5, 'HIGH': 2.5}
+            sl_distance_pct = sl_map.get(vol_level, 1.5)
+        
+        stop_loss = entry_price * (1 - sl_distance_pct / 100)
         risk = entry_price - stop_loss
-        if risk <= 0: risk = entry_price * 0.005 # Fallback risk
-        take_profit = entry_price + (risk * 2.0)
+        
+        # 动态盈亏比：根据波动率调整
+        if vol_level == 'HIGH':
+            risk_reward = 2.0  # 高波降低盈亏比（快进快出）
+        elif vol_level == 'LOW':
+            risk_reward = 3.0  # 低波提高盈亏比（稳健持有）
+        else:
+            risk_reward = 2.5  # 正常波动
+        
+        take_profit = entry_price + (risk * risk_reward)
+        
         
         strategy = {
             'action': 'LONG',
             'entry': entry_price,
             'sl': stop_loss,
             'tp': take_profit,
-            'risk_reward': 2.0
+            'risk_reward': risk_reward,
+            'sl_distance_pct': sl_distance_pct
         }
 
         return {

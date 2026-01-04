@@ -170,19 +170,39 @@ class EntryExitStrategy:
             
         return {'action': None, 'symbol': symbol}
     
-    def compute_position(self, rec: Dict) -> Dict:
+    
+    def compute_position(self, rec: Dict, volatility_level: str = 'NORMAL') -> Dict:
+        """
+        计算仓位大小 (集成 PositionManager)
+        """
         price = rec.get('price')
         sl = rec.get('stop_loss')
-        side = rec.get('side')
-        if not price or not sl or not side:
+        symbol = rec.get('symbol')
+        tp = rec.get('take_profit')
+        
+        if not price or not sl or not symbol:
             return {}
-        risk_dist = price - sl if side == 'LONG' else sl - price
-        if risk_dist <= 0:
+            
+        # 使用 PositionManager 替代旧的硬编码逻辑
+        from src.utils.position_manager import PositionManager
+        pm = PositionManager() # 会自动读取 Config 配置
+        
+        pos_info = pm.calculate_position_size(
+            symbol=symbol,
+            entry_price=price,
+            stop_loss=sl,
+            volatility_level=volatility_level,
+            take_profit=tp
+        )
+        
+        if not pos_info.get('allowed', False):
+            from src.utils.logger import logger
+            logger.warning(f"[{symbol}] 仓位限制: {pos_info.get('reason')}")
             return {}
-        size_base = Config.STRATEGY_RISK_USD / risk_dist
-        notional = size_base * price
-        if notional > Config.STRATEGY_MAX_NOTIONAL_USD:
-            scale = Config.STRATEGY_MAX_NOTIONAL_USD / notional
-            size_base *= scale
-            notional = Config.STRATEGY_MAX_NOTIONAL_USD
-        return {'size_base': size_base, 'notional_usd': notional}
+            
+        return {
+            'size_base': pos_info['size'],
+            'notional_usd': pos_info['notional'],
+            'risk_amount': pos_info['risk_amount'],
+            'pct_of_account': pos_info['pct_of_account']
+        }

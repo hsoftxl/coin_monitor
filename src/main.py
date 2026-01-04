@@ -22,8 +22,9 @@ from src.services.realtime_monitor import RealtimeMonitor
 from src.strategies.entry_exit import EntryExitStrategy
 from src.analyzers.steady_growth import SteadyGrowthAnalyzer
 from src.storage.persistence import Persistence
+from src.utils.market_regime import MarketRegimeDetector
 
-async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, notification_service=None, persistence=None):
+async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, market_regime='NEUTRAL', notification_service=None, persistence=None):
     """
     Process a single symbol across all exchanges.
     """
@@ -156,18 +157,27 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
              if notification_service:
                  await notification_service.send_early_pump_alert(pump, symbol)
 
-        # Panic Dump Analysis (DISABLED)
-        # dump = panic_dump_analyzer.analyze(
-        #     df,
-        #     symbol,
-        #     df_res=df_res,
-        #     sf_strength=sf_strength,
-        #     whales=current_whales
-        # )
-        # if dump:
-        #      logger.critical(f"[{symbol}] {dump['desc']}")
-        #      if notification_service:
-        #          await notification_service.send_panic_dump_alert(dump, symbol)
+        # Panic Dump Analysis (启用做空 - P1优化)
+        # 仅在熊市或 Config.SHORT_ONLY_IN_BEAR=False 时允许
+        allow_short = True
+        if Config.SHORT_ONLY_IN_BEAR and market_regime not in ['BEAR', 'NEUTRAL_BEAR']:
+            allow_short = False
+            
+        dump = None
+        if allow_short:
+            dump = panic_dump_analyzer.analyze(
+                df,
+                symbol,
+                df_res=df_res,
+                sf_strength=sf_strength,
+                whales=current_whales
+            )
+            
+        if dump:
+             dump['vol_24h'] = ticker_24h_vol
+             logger.critical(f"📉 [{symbol}] {dump['desc']}")
+             if notification_service:
+                 await notification_service.send_panic_dump_alert(dump, symbol)
 
         # Steady Growth Analysis (Slow Track - 15m)
         steady = steady_growth_analyzer.analyze(df_res, symbol)
@@ -224,10 +234,18 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
     # 4.1 Strategy
     # 4.1 Strategy
     rec = strategy.evaluate(platform_metrics, consensus, signals, symbol, df_5m=df, df_1h=df_res)
-    pos = strategy.compute_position(rec) if rec.get('action') else {}
+    
+    # 尝试从 analyze 结果中获取波动率等级 (如果之前有 pump/dump 分析)
+    vol_level = 'NORMAL'
+    if 'pump' in locals() and pump and 'volatility_level' in pump:
+        vol_level = pump['volatility_level']
+    elif 'dump' in locals() and dump and 'volatility_level' in dump:
+        vol_level = dump['volatility_level']
+        
+    pos = strategy.compute_position(rec, volatility_level=vol_level) if rec.get('action') else {}
     rec.update(pos)
-    if rec.get('action'):
-        logger.info(f"🎯 [{symbol}] 策略建议: {rec['action']} {rec['side']} @ {rec['price']:.4f} SL={rec.get('stop_loss')} TP={rec.get('take_profit')}")
+    if rec.get('action') and rec.get('size_base'): # Only verify if size calculated
+        logger.info(f"🎯 [{symbol}] 策略建议: {rec['action']} {rec['side']} @ {rec['price']:.4f} Size={rec.get('size_base'):.4f} ({rec.get('notional_usd'):.0f}U)")
         if notification_service:
             await notification_service.send_strategy_recommendation(rec, platform_metrics)
         if persistence:
@@ -317,9 +335,13 @@ async def main():
     multi_analyzer = MultiPlatformAnalyzer()
     sf_analyzer = SpotFuturesAnalyzer()  # Spot-Futures correlation analyzer
     whale_watcher = WhaleWatcher(threshold=Config.WHALE_THRESHOLD) # $200k
+    
+    market_regime_detector = MarketRegimeDetector() # P1/P2 新增
 
     strategy = EntryExitStrategy()
     persistence = Persistence(Config.PERSIST_DB_PATH) if Config.ENABLE_PERSISTENCE else None
+    
+    # ... (notification setup omitted) ...
     
     # 初始化通知服务
     notification_service = None
@@ -349,10 +371,25 @@ async def main():
             cycle_start = time.time()
             logger.info(f"=== 开始新一轮扫描 ({len(target_symbols)} 币种) ===")
             
+            # P1: 获取市场环境 (Based on BTC)
+            market_regime = 'NEUTRAL'
+            try:
+                # 优先使用 Binance
+                regime_conn = initialized.get('binance') or list(initialized.values())[0]
+                if regime_conn:
+                    btc_candles = await regime_conn.fetch_standard_candles('BTC/USDT', limit=100)
+                    if btc_candles:
+                        btc_df = DataProcessor.process_candles(btc_candles)
+                        regime_info = market_regime_detector.analyze(btc_df)
+                        market_regime = regime_info['regime']
+                        logger.info(f"📊 全局市场环境: {regime_info['desc']}")
+            except Exception as e:
+                logger.warning(f"无法获取市场环境数据: {e}")
+            
             # Process symbols in chunks of 5 to control concurrency
             for i in range(0, len(target_symbols), 5):
                 chunk = target_symbols[i:i+5]
-                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, notification_service, persistence) for sym in chunk]
+                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, market_regime, notification_service, persistence) for sym in chunk]
                 await asyncio.gather(*tasks)
 
                 # Small sleep between chunks to be nice to APIs

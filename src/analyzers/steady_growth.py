@@ -78,23 +78,49 @@ class SteadyGrowthAnalyzer:
         self.cooldowns[symbol] = now
         current_price = recent['close'].iloc[-1]
         
-        # Calculate Strategy Targets (Trend Following)
-        # SL: Below MA60 or recent low
+        # Calculate Strategy Targets with Dynamic Stop Loss
         ma60 = recent['ma60'].iloc[-1]
-        sl = ma60 * 0.99
+        
+        # 计算ATR用于动态止损
+        high = recent['high'].values
+        low = recent['low'].values
+        close = recent['close'].values
+        prev_close = np.roll(close, 1)
+        prev_close[0] = close[0]
+        
+        tr1 = high - low
+        tr2 = np.abs(high - prev_close)
+        tr3 = np.abs(low - prev_close)
+        tr = np.maximum(tr1, np.maximum(tr2, tr3))
+        atr = np.mean(tr)
+        
+        # 动态止损：MA60 - ATR*2 (确保足够空间)
+        sl = ma60 - (atr * 2)
         risk = current_price - sl
-        tp = current_price + (risk * 2.5) # Aim for 1:2.5 for trend following
+        
+        # 根据趋势强度调整盈亏比
+        if slope > 0.002:  # 强趋势 (>0.2%)
+            risk_reward = 4.0  # 让利润奔跑
+        elif slope > 0.001:  # 中等趋势 (>0.1%)
+            risk_reward = 3.5
+        else:  # 温和趋势
+            risk_reward = 3.0
+        
+        tp = current_price + (risk * risk_reward)
         
         return {
             'type': 'STEADY_GROWTH',
             'desc': f"稳步上涨趋势确认 (MA多头排列, 斜率+{slope*100:.2f}%)",
             'price': current_price,
-            'grade': 'A', # High quality trend
+            'grade': 'A',
+            'slope': slope,
             'strategy': {
                 'action': 'LONG',
                 'entry': current_price,
                 'sl': sl,
                 'tp': tp,
-                'risk_reward': 2.5
+                'risk_reward': risk_reward,
+                'atr': atr
             }
         }
+

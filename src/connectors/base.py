@@ -79,6 +79,13 @@ class ExchangeConnector(ABC):
         target_symbol = self.resolve_symbol(symbol or self.symbol)
         return await self._retry_request(self.exchange.fetch_trades, target_symbol, limit=limit)
 
+    async def fetch_ticker(self, symbol: str = None) -> Dict:
+        """
+        Fetches 24h ticker data.
+        """
+        target_symbol = self.resolve_symbol(symbol or self.symbol)
+        return await self._retry_request(self.exchange.fetch_ticker, target_symbol)
+
     async def _retry_request(self, func, *args, **kwargs):
         """
         Executes a function with exponential backoff retry logic.

@@ -20,9 +20,10 @@ from src.utils.discovery import SymbolDiscovery
 from src.services.notification import NotificationService
 from src.services.realtime_monitor import RealtimeMonitor
 from src.strategies.entry_exit import EntryExitStrategy
+from src.analyzers.steady_growth import SteadyGrowthAnalyzer
 from src.storage.persistence import Persistence
 
-async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, sf_analyzer, strategy, notification_service=None, persistence=None):
+async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, notification_service=None, persistence=None):
     """
     Process a single symbol across all exchanges.
     """
@@ -53,21 +54,32 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
     }
     results = await asyncio.gather(*tasks.values(), return_exceptions=True)
     
-    # Fetch Multi-Timeframe Data (for MTF confirmation)
-    df_5m_data = None
-    df_1h_data = None
+    
+    # Fetch 24h Ticker (for Volume display)
+    ticker_24h_vol = 0
+    if valid_connectors:
+        first_conn = list(valid_connectors.values())[0]
+        try:
+             ticker = await first_conn.fetch_ticker(symbol)
+             ticker_24h_vol = ticker.get('quoteVolume', 0)
+             # Fallback if quoteVolume is None/0 but baseVolume exists
+             if not ticker_24h_vol and ticker.get('baseVolume') and ticker.get('last'):
+                 ticker_24h_vol = ticker['baseVolume'] * ticker['last']
+        except Exception:
+             pass
+
+    # Fetch Multi-Timeframe Data (for Resonance)
+    df_res = None
     if Config.ENABLE_MULTI_TIMEFRAME and valid_connectors:
         # Use first available connector for MTF data
         first_conn = list(valid_connectors.values())[0]
         try:
-            data_5m = await first_conn.fetch_candles_timeframe(symbol, '5m', limit=20)
-            data_1h = await first_conn.fetch_candles_timeframe(symbol, '1h', limit=50)
-            if data_5m:
-                df_5m_data = DataProcessor.process_candles(data_5m)
-            if data_1h:
-                df_1h_data = DataProcessor.process_candles(data_1h)
+            # Fetch Resonance Timeframe (15m)
+            data_res = await first_conn.fetch_candles_timeframe(symbol, Config.MTF_RES_TIMEFRAME, limit=100)
+            if data_res:
+                df_res = DataProcessor.process_candles(data_res)
         except Exception as e:
-            logger.debug(f"[{symbol}] MTF数据获取失败: {e}")
+            logger.debug(f"[{symbol}] 共振数据({Config.MTF_RES_TIMEFRAME})获取失败: {e}")
     
     # Fetch Spot-Futures Data (for correlation analysis)
     spot_df = None
@@ -117,6 +129,7 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
         # Volume Spike Analysis
         spike = vol_spike_analyzer.analyze(df, symbol)
         if spike:
+             spike['vol_24h'] = ticker_24h_vol
              logger.warning(f"🔥 [{symbol}] 成交量暴增: {spike['ratio']:.1f}x (涨幅 {spike['price_change']:.2f}%)")
              if notification_service:
                  await notification_service.send_volume_spike_alert(spike, symbol)
@@ -128,34 +141,41 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
             if isinstance(t_res, list) and t_res:
                 current_whales = whale_watcher.check_trades(t_res)
 
-        # Early Pump Analysis (Enhanced with MTF + SF correlation + Whales)
+        # Early Pump Analysis (Enhanced with Resonance + SF correlation + Whales)
         sf_strength = sf_correlation['strength'] if sf_correlation else None
         pump = early_pump_analyzer.analyze(
             df, 
             symbol,
-            df_5m=df_5m_data,
-            df_1h=df_1h_data,
+            df_res=df_res,
             sf_strength=sf_strength,
             whales=current_whales
         )
         if pump:
+             pump['vol_24h'] = ticker_24h_vol
              logger.critical(f"[{symbol}] {pump['desc']}")
              if notification_service:
                  await notification_service.send_early_pump_alert(pump, symbol)
 
-        # Panic Dump Analysis
-        dump = panic_dump_analyzer.analyze(
-            df,
-            symbol,
-            df_5m=df_5m_data,
-            df_1h=df_1h_data,
-            sf_strength=sf_strength,
-            whales=current_whales
-        )
-        if dump:
-             logger.critical(f"[{symbol}] {dump['desc']}")
+        # Panic Dump Analysis (DISABLED)
+        # dump = panic_dump_analyzer.analyze(
+        #     df,
+        #     symbol,
+        #     df_res=df_res,
+        #     sf_strength=sf_strength,
+        #     whales=current_whales
+        # )
+        # if dump:
+        #      logger.critical(f"[{symbol}] {dump['desc']}")
+        #      if notification_service:
+        #          await notification_service.send_panic_dump_alert(dump, symbol)
+
+        # Steady Growth Analysis (Slow Track - 15m)
+        steady = steady_growth_analyzer.analyze(df_res, symbol)
+        if steady:
+             steady['vol_24h'] = ticker_24h_vol
+             logger.info(f"💎 [{symbol}] {steady['desc']}")
              if notification_service:
-                 await notification_service.send_panic_dump_alert(dump, symbol)
+                 await notification_service.send_steady_growth_alert(steady, symbol)
         
     if valid_data_count < 2:
         return # Skip if not enough data for consensus
@@ -190,7 +210,8 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
         await notification_service.send_consensus_alert(consensus, platform_metrics, symbol)
 
     # 4. Signals
-    signals = multi_analyzer.analyze_signals(platform_metrics, symbol=symbol, df_5m=df_5m_data, df_1h=df_1h_data)
+    # 4. Signals
+    signals = multi_analyzer.analyze_signals(platform_metrics, symbol=symbol, df_5m=df, df_1h=df_res)
     for signal in signals:
         logger.critical(f"🚨 [{symbol}] 信号触发 [{signal['grade']}]: {signal['type']} - {signal['desc']}")
         
@@ -201,7 +222,8 @@ async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_an
             persistence.save_signal(signal, platform_metrics, symbol)
 
     # 4.1 Strategy
-    rec = strategy.evaluate(platform_metrics, consensus, signals, symbol, df_5m=df_5m_data, df_1h=df_1h_data)
+    # 4.1 Strategy
+    rec = strategy.evaluate(platform_metrics, consensus, signals, symbol, df_5m=df, df_1h=df_res)
     pos = strategy.compute_position(rec) if rec.get('action') else {}
     rec.update(pos)
     if rec.get('action'):
@@ -253,7 +275,8 @@ async def main():
     # Coin Discovery - OKX Only
     target_symbols = [Config.SYMBOL]
     if Config.ENABLE_MULTI_SYMBOL:
-        logger.info("正在扫描 Binance 平台所有 USDT 交易对...")
+        market_label = "现货" if Config.MARKET_TYPE == 'spot' else "合约"
+        logger.info(f"正在扫描 Binance 平台所有 USDT {market_label}交易对...")
         try:
             # Initialize Binance temporarily just for symbol discovery
             binance_temp = BinanceConnector()
@@ -290,6 +313,7 @@ async def main():
     vol_spike_analyzer = VolumeSpikeAnalyzer()
     early_pump_analyzer = EarlyPumpAnalyzer()
     panic_dump_analyzer = PanicDumpAnalyzer()
+    steady_growth_analyzer = SteadyGrowthAnalyzer()
     multi_analyzer = MultiPlatformAnalyzer()
     sf_analyzer = SpotFuturesAnalyzer()  # Spot-Futures correlation analyzer
     whale_watcher = WhaleWatcher(threshold=Config.WHALE_THRESHOLD) # $200k
@@ -328,7 +352,7 @@ async def main():
             # Process symbols in chunks of 5 to control concurrency
             for i in range(0, len(target_symbols), 5):
                 chunk = target_symbols[i:i+5]
-                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, sf_analyzer, strategy, notification_service, persistence) for sym in chunk]
+                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, notification_service, persistence) for sym in chunk]
                 await asyncio.gather(*tasks)
 
                 # Small sleep between chunks to be nice to APIs

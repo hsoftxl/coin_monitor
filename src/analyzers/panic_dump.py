@@ -21,7 +21,9 @@ class PanicDumpAnalyzer:
     1. Rapid price drop (adaptive % based on volatility)
     2. Taker Sell dominance (> 60% or Buy/Sell Ratio < 0.4)
     3. Volume explosion (> 5x 1h average)
-    4. Multi-timeframe trend confirmation (Downtrend)
+    2. Taker Sell dominance (> 60% or Buy/Sell Ratio < 0.4)
+    3. Volume explosion (> 5x 1h average)
+    4. 5m/15m Resonance (5m Dump + 15m Trend DOWN)
     5. Whale Confirmation & Strategy Targets
     """
     def __init__(self):
@@ -33,10 +35,9 @@ class PanicDumpAnalyzer:
         self.vol_factor = Config.EARLY_PUMP_VOL_FACTOR
         self.sell_ratio_threshold = getattr(Config, 'PANIC_DUMP_SELL_RATIO', 0.6)
         
-        # Multi-timeframe settings
+        # Resonance settings
         self.enable_mtf = Config.ENABLE_MULTI_TIMEFRAME
-        self.mtf_5m_bars = Config.MTF_5M_TREND_BARS
-        self.mtf_1h_ma_period = Config.MTF_1H_MA_PERIOD
+        self.res_ma_period = 20 # 15m MA20 for trend check
         
         # Adaptive threshold settings
         self.enable_adaptive = Config.ENABLE_ADAPTIVE_THRESHOLD
@@ -74,52 +75,40 @@ class PanicDumpAnalyzer:
         
         return threshold, vol_level
 
-    def _check_multi_timeframe(
+    def _check_resonance(
         self, 
-        df_5m: Optional[pd.DataFrame], 
-        df_1h: Optional[pd.DataFrame],
+        df_res: Optional[pd.DataFrame], 
         current_price: float
     ) -> Tuple[bool, str]:
         """
-        Check multi-timeframe confirmation for DUMP.
-        We want 5m downtrend and Price < 1h MA.
+        Check 15m resonance for DUMP.
+        Requirement: 15m Trend Bearish (Price < MA20)
         """
         if not self.enable_mtf:
             return True, ""
         
-        if df_5m is None or df_1h is None:
-            return True, "MTF数据不足"
+        if df_res is None or df_res.empty:
+            return True, "共振数据不足"
         
-        # Check 5m trend (Down)
-        # Re-use is_trend_up logic but invert? Or implement is_trend_down
-        # Simple check: MA5 < MA10 or Close < MA20
-        # Let's use simple logic here:
-        close_5m = df_5m['close'].iloc[-1]
-        ma20_5m = df_5m['close'].rolling(20).mean().iloc[-1]
-        trend_5m_down = close_5m < ma20_5m
+        # Check 15m MA20
+        ma_res = calculate_ma(df_res, self.res_ma_period)
         
-        # Check 1h MA20
-        ma_1h = calculate_ma(df_1h, self.mtf_1h_ma_period)
-        ma_1h_ok = ma_1h is not None and current_price < ma_1h
-        
-        if trend_5m_down and ma_1h_ok:
-            return True, "✓5m趋势下行+1hMA压制"
-        elif not trend_5m_down:
-            return False, "✗5m趋势未确认"
+        # Resonance Condition: Price < 15m MA20
+        if ma_res is not None and current_price < ma_res:
+             return True, "✓15m趋势共振(下跌)"
         else:
-            return False, "✗高于1hMA20"
+             return False, "✗15m趋势未确认"
 
     def analyze(
         self, 
         df: pd.DataFrame, 
         symbol: str,
-        df_5m: Optional[pd.DataFrame] = None,
-        df_1h: Optional[pd.DataFrame] = None,
+        df_res: Optional[pd.DataFrame] = None,
         sf_strength: Optional[str] = None,
         whales: Optional[List[Dict]] = None
     ) -> Optional[Dict]:
         """
-        Detects panic dump signals.
+        Detects panic dump signals with 5m/15m resonance.
         """
         if df.empty or len(df) < (self.history_window + 2):
             return None
@@ -172,8 +161,8 @@ class PanicDumpAnalyzer:
         if sell_ratio < self.sell_ratio_threshold:
             return None
         
-        # 4. MTF Confirmation
-        mtf_confirmed, mtf_msg = self._check_multi_timeframe(df_5m, df_1h, close_price)
+        # 4. Resonance Confirmation
+        mtf_confirmed, mtf_msg = self._check_resonance(df_res, close_price)
         
         if not mtf_confirmed:
             return None

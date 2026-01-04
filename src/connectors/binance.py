@@ -7,6 +7,28 @@ from src.config import Config # Added import for Config
 class BinanceConnector(ExchangeConnector):
     def __init__(self):
         super().__init__('binance')
+        
+    async def initialize(self):
+        """
+        Overridden to support Futures options
+        """
+        import ccxt.async_support as ccxt
+        try:
+            options = {}
+            if Config.MARKET_TYPE == 'future':
+                options['defaultType'] = Config.BINANCE_FUTURE_TYPE
+                
+            self.exchange = ccxt.binance({
+                'enableRateLimit': True,
+                'timeout': 10000,
+                'options': options,
+                'userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+            await self.exchange.load_markets()
+            logger.info(f"Initialized binance connector (Mode: {Config.MARKET_TYPE})")
+        except Exception as e:
+            logger.error(f"Failed to initialize binance: {e}")
+            raise
 
     async def fetch_standard_candles(self, symbol: str = None, limit: int = Config.LIMIT_KLINE) -> List[StandardCandle]:
         target_symbol = symbol or self.symbol
@@ -24,7 +46,13 @@ class BinanceConnector(ExchangeConnector):
                 'interval': self.timeframe,
                 'limit': limit
             }
-            response = await self.exchange.public_get_klines(params)
+            
+            if Config.MARKET_TYPE == 'future':
+                # Futures API endpoint
+                response = await self.exchange.fapiPublicGetKlines(params)
+            else:
+                # Spot API endpoint
+                response = await self.exchange.public_get_klines(params)
             
             candles = []
             for k in response:

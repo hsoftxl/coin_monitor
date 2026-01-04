@@ -16,10 +16,10 @@ class EarlyPumpAnalyzer:
     Analyzes the 'initial stage' of a pump using 1-minute data specifically.
     
     Enhanced with:
-    1. Multi-timeframe confirmation
     2. Adaptive volatility threshold
     3. Spot-Futures correlation
     4. Whale Confirmation & Strategy Targets
+    5. 5m/15m Resonance (5m Pump + 15m Trend UP)
     """
     def __init__(self):
         self.cooldowns: Dict[str, float] = {}
@@ -28,10 +28,9 @@ class EarlyPumpAnalyzer:
         self.vol_factor = Config.EARLY_PUMP_VOL_FACTOR
         self.buy_ratio_threshold = Config.EARLY_PUMP_BUY_RATIO
         
-        # Multi-timeframe settings
+        # Resonance settings
         self.enable_mtf = Config.ENABLE_MULTI_TIMEFRAME
-        self.mtf_5m_bars = Config.MTF_5M_TREND_BARS
-        self.mtf_1h_ma_period = Config.MTF_1H_MA_PERIOD
+        self.res_ma_period = 20 # 15m MA20 for trend check
         
         # Adaptive threshold settings
         self.enable_adaptive = Config.ENABLE_ADAPTIVE_THRESHOLD
@@ -73,57 +72,46 @@ class EarlyPumpAnalyzer:
         
         return threshold, vol_level
 
-    def _check_multi_timeframe(
+    def _check_resonance(
         self, 
-        df_5m: Optional[pd.DataFrame], 
-        df_1h: Optional[pd.DataFrame],
+        df_res: Optional[pd.DataFrame], 
         current_price: float
     ) -> Tuple[bool, str]:
         """
-        Check multi-timeframe confirmation.
-        
-        Returns:
-            (is_confirmed, status_message)
+        Check 15m resonance.
+        Requirement: 15m Trend Bullish (Price > MA20)
         """
         if not self.enable_mtf:
             return True, ""
         
-        if df_5m is None or df_1h is None:
-            # If MTF data not available, skip this check (backward compatible)
-            return True, "MTF数据不足"
+        if df_res is None or df_res.empty:
+            return True, "共振数据不足"
         
-        # Check 5m trend
-        trend_5m_ok = is_trend_up(df_5m, self.mtf_5m_bars)
+        # Check 15m MA20
+        ma_res = calculate_ma(df_res, self.res_ma_period)
         
-        # Check 1h MA20
-        ma_1h = calculate_ma(df_1h, self.mtf_1h_ma_period)
-        ma_1h_ok = ma_1h is not None and current_price > ma_1h
-        
-        # Both must be true
-        if trend_5m_ok and ma_1h_ok:
-            return True, "✓5m趋势+1hMA"
-        elif not trend_5m_ok:
-            return False, "✗5m趋势下行"
+        # Resonance Condition: Price > 15m MA20
+        # Ideally, we also want 15m to be capable of pump (not overextended), but for now just trend check.
+        if ma_res is not None and current_price > ma_res:
+             return True, "✓15m趋势共振"
         else:
-            return False, "✗低于1hMA20"
+             return False, "✗15m趋势未确认"
 
     def analyze(
         self, 
         df: pd.DataFrame, 
         symbol: str,
-        df_5m: Optional[pd.DataFrame] = None,
-        df_1h: Optional[pd.DataFrame] = None,
+        df_res: Optional[pd.DataFrame] = None,
         sf_strength: Optional[str] = None,
         whales: Optional[List[Dict]] = None
     ) -> Optional[Dict]:
         """
-        Detects early pump signals with enhanced multi-timeframe and volatility analysis.
+        Detects early pump signals with 5m/15m resonance.
         
         Args:
-            df: 1m candle data
+            df: 5m candle data (Base)
             symbol: Trading symbol
-            df_5m: Optional 5m candle data for trend confirmation
-            df_1h: Optional 1h candle data for MA confirmation
+            df_res: Optional 15m candle data for resonance
             sf_strength: Optional spot-futures correlation strength
             whales: Optional list of recent whale trades
         """
@@ -179,11 +167,11 @@ class EarlyPumpAnalyzer:
         if buy_ratio < self.buy_ratio_threshold:
             return None
         
-        # 4. Multi-timeframe confirmation
-        mtf_confirmed, mtf_msg = self._check_multi_timeframe(df_5m, df_1h, close_price)
+        # 4. Resonance Confirmation
+        mtf_confirmed, mtf_msg = self._check_resonance(df_res, close_price)
         
         if not mtf_confirmed:
-            logger.debug(f"[{symbol}] MTF未确认: {mtf_msg}")
+            logger.debug(f"[{symbol}] 共振未确认: {mtf_msg}")
             return None
             
         # Triggered!

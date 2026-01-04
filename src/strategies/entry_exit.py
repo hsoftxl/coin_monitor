@@ -102,17 +102,17 @@ class EntryExitStrategy:
                 side = 'LONG'
                 reason = f'Bullish Consensus + Trend({trend_1h})'
 
-        # Short Entry
-        elif bearish_consensus and total_flow <= -self.min_total_flow:
-            # MTF Confirmation: Don't go short if 1h trend is bullish
-            mtf_ok = True
-            if trend_1h == "BULLISH": 
-                mtf_ok = False
+        # Short Entry (DISABLED)
+        # elif bearish_consensus and total_flow <= -self.min_total_flow:
+        #     # MTF Confirmation: Don't go short if 1h trend is bullish
+        #     mtf_ok = True
+        #     if trend_1h == "BULLISH": 
+        #         mtf_ok = False
                 
-            if midband_ok and streak >= self.min_consensus_bars and mtf_ok:
-                action = 'ENTRY'
-                side = 'SHORT'
-                reason = f'Bearish Consensus + Trend({trend_1h})'
+        #     if midband_ok and streak >= self.min_consensus_bars and mtf_ok:
+        #         action = 'ENTRY'
+        #         side = 'SHORT'
+        #         reason = f'Bearish Consensus + Trend({trend_1h})'
         
         if action:
             sl = None

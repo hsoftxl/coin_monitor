@@ -63,30 +63,30 @@ class MultiPlatformAnalyzer:
                          'desc': '主力全平台吸筹，市场做多情绪一致 (多周期共振)。'
                      })
 
-        # 2. Global Sync Bearish (Global Sync Bearish) -> A+
+        # 2. Global Sync Bearish (DISABLED)
         # Logic: All valid platforms Negative Flow & Buy/Sell Ratio < 0.85
-        all_negative = True
-        all_strong_sell = True
+        # all_negative = True
+        # all_strong_sell = True
         
-        for p, m in platform_metrics.items():
-            if m.get('cumulative_net_flow', 0) >= 0:
-                all_negative = False
-            if m.get('buy_sell_ratio', 1.0) >= 0.85:
-                all_strong_sell = False
+        # for p, m in platform_metrics.items():
+        #     if m.get('cumulative_net_flow', 0) >= 0:
+        #         all_negative = False
+        #     if m.get('buy_sell_ratio', 1.0) >= 0.85:
+        #         all_strong_sell = False
                 
-        if count_valid >= 3 and all_negative and all_strong_sell:
-             # Check Trend Alignment (Bearish)
-             is_aligned = True
-             if trend_5m == "BULLISH" or trend_1h == "BULLISH":
-                 is_aligned = False
+        # if count_valid >= 3 and all_negative and all_strong_sell:
+        #      # Check Trend Alignment (Bearish)
+        #      is_aligned = True
+        #      if trend_5m == "BULLISH" or trend_1h == "BULLISH":
+        #          is_aligned = False
                  
-             if is_aligned:
-                     signals.append({
-                         'symbol': symbol,
-                         'type': '全球协同出货 (Global Sync Bearish)',
-                         'grade': 'B+',
-                         'desc': '主力全平台出货，市场做空情绪一致 (多周期共振)。'
-                     })
+        #      if is_aligned:
+        #              signals.append({
+        #                  'symbol': symbol,
+        #                  'type': '全球协同出货 (Global Sync Bearish)',
+        #                  'grade': 'B+',
+        #                  'desc': '主力全平台出货，市场做空情绪一致 (多周期共振)。'
+        #              })
 
         # 3. US Institutional Accumulation (A)
         # Coinbase Net Flow >> others & Whale Buy Concentrated

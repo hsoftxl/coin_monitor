@@ -11,8 +11,8 @@ class VolumeSpikeAnalyzer:
     """
     def __init__(self):
         self.cooldowns: Dict[str, float] = {}  # symbol -> last_alert_timestamp
-        self.history_window = 300 # 5 hours for baseline
-        self.spike_window = 15     # 15 minutes for spike detection
+        self.history_window = 60   # 5 hours (60 * 5m)
+        self.spike_window = 3      # 15 minutes (3 * 5m)
         self.factor = Config.SPIKE_VOL_FACTOR
         self.min_price_change = Config.SPIKE_MIN_PRICE_CHANGE
         self.cooldown_sec = Config.SPIKE_COOLDOWN_MINUTES * 60
@@ -40,9 +40,13 @@ class VolumeSpikeAnalyzer:
         history_df = df.iloc[-(self.history_window + self.spike_window):-self.spike_window]
         
         # Determine average volume for a 15m period in history
-        # Simple approach: Total volume of history / (minutes / 15)
-        # 300 minutes history has roughly 20 chunks of 15m
-        avg_15m_vol = history_df['volume'].sum() / (len(history_df) / 15.0)
+        # With 5m candles, a 15m chunks is 3 rows.
+        # Average volume per 15m = Average volume per candle * 3
+        if len(history_df) > 0:
+            avg_candle_vol = history_df['volume'].mean()
+            avg_15m_vol = avg_candle_vol * 3
+        else:
+            avg_15m_vol = 0
         
         if avg_15m_vol <= 0:
             return None

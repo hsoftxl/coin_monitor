@@ -416,6 +416,7 @@ class NotificationService:
 **15m涨幅**: <font color='red'>**+{change:.2f}%**</font>
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
+{self._format_24h_vol(spike_data.get('vol_24h', 0))}
 
 ---
 
@@ -454,6 +455,7 @@ class NotificationService:
 **主动买入**: <font color='red'>**{buy_ratio:.0f}%**</font> (强力扫货)
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
+{self._format_24h_vol(data.get('vol_24h', 0))}
 
 ---
 
@@ -544,7 +546,7 @@ class NotificationService:
         
 **币种**: **{symbol}** [{market_label}]
 **状态**: {status_text}
-**1分钟涨幅**: <font color='red'>**+{pct:.2f}%**</font>
+**实时涨幅**: <font color='red'>**+{pct:.2f}%**</font>
 **成交额**: <font color='red'>**${vol:,.0f}**</font> USDT
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
@@ -552,7 +554,7 @@ class NotificationService:
 ---
 
 **分析**:
-WebSocket 实时监控捕获，币种在 1分钟内快速拉升，建议关注！
+WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 
 ---
 <font color='comment'>*Realtime WebSocket Monitor - {market_label}*</font>
@@ -563,6 +565,61 @@ WebSocket 实时监控捕获，币种在 1分钟内快速拉升，建议关注�
         if self.enable_dingtalk:
             await self.send_dingtalk(message, at_all=True)
             
+            
         if self.enable_wechat:
             await self.send_wechat(message)
+
+    async def send_steady_growth_alert(self, data: Dict, symbol: str):
+        """
+        发送稳步上涨警报 (Steady Growth)
+        """
+        if not (self.enable_dingtalk or self.enable_wechat):
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        price = data['price']
+        
+        message = f"""### 💎 稳步上涨趋势确认
+        
+**币种**: **{symbol}**
+**形态**: 均线多头排列 (MA20 > MA60)
+**当前价格**: ${price:,.4f}
+**触发时间**: {timestamp}
+{self._format_24h_vol(data.get('vol_24h', 0))}
+
+---
+
+**分析**:
+监控到主力资金在做盘，走势温和且坚定 (15m级别)，适合顺势而为。
+{f'''
+**策略建议**:
+**动作**: {data['strategy']['action']} (盈亏比 {data['strategy']['risk_reward']}:1)
+**买入**: ${data['strategy']['entry']:.4f}
+**止损**: ${data['strategy']['sl']:.4f}
+**止盈**: ${data['strategy']['tp']:.4f}''' if 'strategy' in data else ''}
+
+---
+<font color='comment'>*Steady Growth Strategy (15m)*</font>
+"""
+        logger.info(f"💎 触发稳步上涨警报 [{symbol}]，推送通知...")
+        
+        if self.enable_dingtalk:
+            await self.send_dingtalk(message, at_all=False)
+            
+        if self.enable_wechat:
+            await self.send_wechat(message)
+
+    def _format_24h_vol(self, vol_24h: float) -> str:
+        if not vol_24h:
+            return ""
+        if vol_24h >= 100000000: # 100M
+             vol_str = f"${vol_24h/1000000:.1f}M"
+        elif vol_24h >= 1000000: # 1M
+             vol_str = f"${vol_24h/1000000:.2f}M"
+        elif vol_24h >= 1000:
+             vol_str = f"${vol_24h/1000:.0f}k"
+        else:
+             vol_str = f"${vol_24h:.0f}"
+             
+        return f"**24h成交额**: {vol_str}"
 

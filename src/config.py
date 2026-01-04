@@ -11,8 +11,18 @@ class Config:
     # 是否启用多币种扫描
     ENABLE_MULTI_SYMBOL = True
     
-    # K线时间周期
-    TIMEFRAME = "1m"
+    # K线时间周期 (Base Timeframe - 1m for Early Pump)
+    TIMEFRAME = "1m" 
+    
+    # 市场类型: 'spot' (现货) 或 'future' (U本位合约)
+    MARKET_TYPE = "future"
+    
+    # Binance 合约类型 (当 MARKET_TYPE='future' 时有效)
+    # 'swap': 永续合约 (USDT-M)
+    BINANCE_FUTURE_TYPE = 'future' # ccxt property 'defaultType' 
+    
+    # 共振时间周期 (Resonance Timeframe)
+    MTF_RES_TIMEFRAME = "15m"
     
     # 数据获取限制
     LIMIT_KLINE = 300    # K线数量
@@ -33,9 +43,9 @@ class Config:
     # ==================== 交易所配置 ====================
     EXCHANGES = {
         "binance": True,
-        "okx": True,
-        "bybit": True,
-        "coinbase": True
+        "okx": False,
+        "bybit": False,
+        "coinbase": False
     }
     
     # ==================== 通知配置 ====================
@@ -70,19 +80,19 @@ class Config:
     EARLY_PUMP_BUY_RATIO = 0.6       # 主动买入占比 > 60%
     EARLY_PUMP_COOLDOWN = 10         # 冷却时间（分钟）
     
-    # ==================== 多时间框架配置 ====================
+    # ==================== 多时间框架配置 (Resonance) ====================
     ENABLE_MULTI_TIMEFRAME = True        # 启用多时间框架确认
-    MTF_5M_TREND_BARS = 3                # 5分钟趋势确认K线数
-    MTF_1H_MA_PERIOD = 20                # 1小时MA周期
+    MTF_RES_TIMEFRAME = "15m"            # 共振确认周期
+    MTF_MA_PERIOD = 20                   # 均线周期 (用于15m确认)
     
     # ==================== 波动率自适应配置 ====================
     ENABLE_ADAPTIVE_THRESHOLD = True      # 启用波动率自适应
     ATR_PERIOD = 14                       # ATR计算周期
-    VOLATILITY_LOW_THRESHOLD = 2.0        # 低波动阈值 %
-    VOLATILITY_HIGH_THRESHOLD = 5.0       # 高波动阈值 %
-    PUMP_THRESHOLD_LOW_VOL = 0.8          # 低波动币种涨幅阈值
-    PUMP_THRESHOLD_NORMAL_VOL = 1.0       # 正常波动涨幅阈值
-    PUMP_THRESHOLD_HIGH_VOL = 1.5         # 高波动币种涨幅阈值
+    VOLATILITY_LOW_THRESHOLD = 3.0        # 低波动阈值 % (5m ATR)
+    VOLATILITY_HIGH_THRESHOLD = 8.0       # 高波动阈值 % (5m ATR)
+    PUMP_THRESHOLD_LOW_VOL = 1.5          # 低波动币种涨幅阈值
+    PUMP_THRESHOLD_NORMAL_VOL = 2.0       # 正常波动涨幅阈值
+    PUMP_THRESHOLD_HIGH_VOL = 3.0         # 高波动币种涨幅阈值
     
     # ==================== 现货-合约联动配置 ====================
     ENABLE_SPOT_FUTURES_CORRELATION = True  # 启用现货合约联动
@@ -96,7 +106,7 @@ class Config:
     ENABLE_SPOT_MARKET = True              # 监控现货市场
     ENABLE_FUTURES_MARKET = True           # 监控永续合约市场
     
-    REALTIME_PUMP_THRESHOLD = 1.0          # 涨幅阈值 %
+    REALTIME_PUMP_THRESHOLD = 2.0          # 涨幅阈值 % (Raise to avoid noise)
     REALTIME_MIN_VOLUME = 100000           # 最小成交额 USDT
     REALTIME_BLACKLIST = ["UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT", "BUSDUSDT", "USDCUSDT"]
     

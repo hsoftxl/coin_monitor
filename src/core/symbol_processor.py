@@ -232,7 +232,9 @@ async def analyze_platform(
          steady['vol_24h'] = ticker_24h_vol
          logger.info(f"💎 [{symbol}] {steady['desc']}")
          if ctx.notification_service:
-             await ctx.notification_service.send_steady_growth_alert(steady, symbol)
+             # 检查策略是否是学习后的
+             is_strategy_learned = hasattr(ctx.strategy, 'is_strategy_learned') and ctx.strategy.is_strategy_learned
+             await ctx.notification_service.send_steady_growth_alert(steady, symbol, is_strategy_learned=is_strategy_learned)
          signals.append(('steady_growth', steady))
     
     return {

@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""
+独立的策略学习程序
+持续运行，自动学习最优交易策略，实时监测高胜率交易机会并通知
+"""
+
+import sys
+import os
+import argparse
+import json
+import asyncio
+from datetime import datetime
+from loguru import logger
+
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.config import Config
+from src.services.strategy_learner import StrategyLearner
+from src.services.symbol_selector import SymbolSelector
+from src.services.notification import NotificationService
+from src.strategies.entry_exit import EntryExitStrategy
+from src.connectors.binance import BinanceConnector
+
+
+async def send_trading_signal_notification(
+    notification_service: NotificationService,
+    symbols: list,
+    strategy_params: dict,
+    reason: str = "策略筛选"
+):
+    """发送交易信号通知（使用主通道）"""
+    
+    if not symbols:
+        return
+    
+    # 检查通知服务是否启用
+    if not notification_service:
+        return
+    
+    # 格式化币种列表
+    symbols_text = "\n".join([f"- **{sym.replace('/USDT', '')}**" for sym in symbols])
+    
+    params_text = f"""
+- 最小资金流向: {strategy_params.get('min_total_flow', 100000):,.0f}
+- 最小买卖比: {strategy_params.get('min_ratio', 1.5):.1f}
+- 止损倍数: {strategy_params.get('atr_sl_mult', 1.5):.1f}
+- 止盈倍数: {strategy_params.get('atr_tp_mult', 2.0):.1f}"""
+
+    message = f"""### 🚀 【实盘交易信号】{reason}
+
+**通知时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**发现数量**: {len(symbols)} 个符合条件的品种
+
+**策略参数**:{params_text}
+
+---
+
+### ✅ 符合策略条件的品种:
+
+{symbols_text}
+
+---
+
+<font color='comment'>*自动策略监测系统 - 请结合K线形态和风险管理谨慎决策*</font>
+"""
+    
+    logger.info(f"📢 发送交易信号通知 ({len(symbols)} 个品种)...")
+    
+    # 交易信号使用主通道
+    if notification_service.enable_dingtalk:
+        await notification_service.send_dingtalk(message, at_all=False)
+    
+    if notification_service.enable_wechat:
+        await notification_service.send_wechat(message)
+    
+    logger.info("✅ 交易信号通知发送完成")
+
+
+async def send_strategy_learning_notification(
+    notification_service: NotificationService,
+    best_params: dict,
+    winrate: float,
+    cycle_num: int
+):
+    """发送策略学习通知（使用独立通道）"""
+    
+    # 检查通知服务是否启用
+    if not notification_service:
+        return
+    
+    params_text = ""
+    for key, value in best_params.items():
+        params_text += f"- **{key}**: {value}\n"
+    
+    message = f"""### 📊 【策略学习】第 {cycle_num} 轮优化完成
+
+**学习时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**全局最优胜率**: <font color='green'>**{winrate:.2%}**</font>
+
+**最优参数**:
+{params_text}
+
+---
+
+<font color='comment'>*自动策略学习系统 - 轮次 {cycle_num}*</font>
+"""
+    
+    logger.info("📢 发送策略学习通知...")
+    
+    # 策略学习通知使用独立通道（如果启用）
+    if notification_service.enable_pump_growth_channel:
+        # 使用独立通道发送
+        if notification_service.enable_dingtalk and notification_service.pump_growth_dingtalk_webhook:
+            await notification_service.send_dingtalk(
+                message, 
+                at_all=False, 
+                webhook=notification_service.pump_growth_dingtalk_webhook,
+                secret=notification_service.pump_growth_dingtalk_secret
+            )
+        if notification_service.enable_wechat and notification_service.pump_growth_wechat_webhook:
+            await notification_service.send_wechat(
+                message, 
+                webhook=notification_service.pump_growth_wechat_webhook
+            )
+        logger.info("✅ 策略学习通知已通过独立通道发送")
+    else:
+        # 如果没有独立通道，不发送通知
+        logger.warning("⚠️  未启用独立通道，策略学习通知将不会发送")
+    
+    logger.info("✅ 策略学习通知处理完成")
+
+
+async def get_top_volume_symbols(binance, limit: int = 100) -> list:
+    """获取高成交量品种列表"""
+    tickers = await binance.exchange.fetch_tickers()
+    
+    usdt_tickers = {}
+    for s, t in tickers.items():
+        if '/USDT' in s:
+            qv = t.get('quoteVolume')
+            if qv is None:
+                base_vol = t.get('baseVolume')
+                last = t.get('last') or 0
+                qv = (base_vol or 0) * last
+            if qv and qv >= Config.MIN_24H_QUOTE_VOLUME:
+                usdt_tickers[s] = qv
+    
+    sorted_symbols = sorted(usdt_tickers.items(), key=lambda x: x[1], reverse=True)
+    return [s[0] for s in sorted_symbols[:limit]]
+
+
+async def scan_and_notify(
+    binance: BinanceConnector,
+    notification_service,
+    strategy: EntryExitStrategy,
+    all_symbols: list,
+    last_notified: set
+) -> set:
+    """扫描品种，发现新机会时通知"""
+    
+    if not strategy:
+        return last_notified
+    
+    selector = SymbolSelector(strategy)
+    selected_symbols = await selector.select_symbols(all_symbols)
+    
+    # 找出新增的品种
+    new_symbols = [s for s in selected_symbols if s not in last_notified]
+    
+    if new_symbols:
+        logger.info(f"🎯 发现 {len(new_symbols)} 个新品种符合条件")
+        await send_trading_signal_notification(
+            notification_service,
+            new_symbols,
+            {
+                'min_total_flow': strategy.min_total_flow,
+                'min_ratio': strategy.min_ratio,
+                'atr_sl_mult': strategy.atr_sl_mult,
+                'atr_tp_mult': strategy.atr_tp_mult
+            },
+            "实时监测到新机会"
+        )
+    
+    # 更新已通知的品种集合
+    return set(selected_symbols)
+
+
+async def run_learning_cycle(cycle_num: int, args, notification_service, binance) -> tuple:
+    """执行一轮策略学习，返回(学习是否成功, 最优策略, 胜率)"""
+    logger.info(f"\n{'='*60}")
+    logger.info(f"🔄 第 {cycle_num} 轮策略学习")
+    logger.info(f"{'='*60}")
+    
+    try:
+        # 1. 获取高成交量品种
+        top_symbols = await get_top_volume_symbols(binance, args.limit)
+        
+        # 2. 策略学习
+        logger.info("🔍 开始策略学习...")
+        learner = StrategyLearner()
+        results = await learner.learn(symbols=top_symbols, days=args.days)
+        
+        if results and 'global' in results:
+            best_params = results['global']['params']
+            winrate = results['global']['winrate']
+            learned_symbols = results['global']['symbols']
+            
+            logger.info(f"🎉 策略学习完成！")
+            logger.info(f"   全局最优胜率: {winrate:.2%}")
+            logger.info(f"   最优参数: {best_params}")
+            
+            # 创建最优策略
+            best_strategy = EntryExitStrategy(**best_params)
+            best_strategy.is_strategy_learned = True
+            
+            # 保存结果
+            with open(args.output, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'best_params': best_params,
+                    'winrate': winrate,
+                    'learned_symbols': learned_symbols,
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'cycle': cycle_num
+                }, f, indent=2, ensure_ascii=False)
+            
+
+            
+            return True, best_strategy, winrate
+        else:
+            logger.warning("⚠️  策略学习失败")
+            return False, None, 0.0
+        
+    except Exception as e:
+        logger.error(f"❌ 第 {cycle_num} 轮学习失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, None, 0.0
+
+
+async def main():
+    """主函数 - 持续运行策略学习和实时监测"""
+    parser = argparse.ArgumentParser(description='独立策略学习程序（持续运行版）')
+    parser.add_argument('--days', type=int, default=Config.STRATEGY_LEARNING_DAYS,
+                        help='回测天数 (默认: %(default)s)')
+    parser.add_argument('--limit', type=int, default=100,
+                        help='回测品种数量限制 (默认: %(default)s)')
+    parser.add_argument('--learn-interval', type=int, default=14400,
+                        help='策略学习间隔，单位秒 (默认: 14400，即4小时)')
+    parser.add_argument('--scan-interval', type=int, default=300,
+                        help='品种扫描间隔，单位秒 (默认: 300，即5分钟)')
+    parser.add_argument('--output', type=str, default='strategy_results.json',
+                        help='策略结果输出文件 (默认: %(default)s)')
+    parser.add_argument('--notify', action='store_true', default=True,
+                        help='发现机会时发送通知 (默认: 启用)')
+    parser.add_argument('--no-notify', action='store_false', dest='notify',
+                        help='不发送通知')
+    args = parser.parse_args()
+    
+    learn_interval_text = f"{args.learn_interval // 3600}小时" if args.learn_interval >= 3600 else f"{args.learn_interval // 60}分钟"
+    scan_interval_text = f"{args.scan_interval // 60}分钟" if args.scan_interval >= 60 else f"{args.scan_interval}秒"
+    
+    logger.info("🚀 启动自动策略交易系统...")
+    logger.info(f"📊 回测天数: {args.days}天, 品种限制: {args.limit}")
+    logger.info(f"🔄 学习间隔: {learn_interval_text}")
+    logger.info(f"🔍 扫描间隔: {scan_interval_text}")
+    logger.info(f"🔔 通知: {'是' if args.notify else '否'}")
+    logger.info(f"📁 独立通道: {'启用' if Config.ENABLE_PUMP_GROWTH_CHANNEL else '未启用'}")
+    
+    notification_service = None
+    if args.notify and (Config.ENABLE_DINGTALK or Config.ENABLE_WECHAT):
+        notification_service = NotificationService()
+        logger.info("✅ 通知服务已启用")
+    else:
+        logger.info("ℹ️  通知服务未启用")
+    
+    binance = None
+    current_strategy = None
+    current_winrate = 0.0
+    cycle_num = 0
+    last_notified = set()
+    all_symbols = []
+    
+    try:
+        binance = BinanceConnector()
+        await binance.initialize()
+        await binance.exchange.load_markets()
+        
+        # 初始获取品种列表
+        all_symbols = await get_top_volume_symbols(binance, args.limit)
+        
+        # 立即执行第一轮学习
+        success, current_strategy, current_winrate = await run_learning_cycle(1, args, notification_service, binance)
+        if success and current_strategy:
+            # 学习完成后立即扫描
+            last_notified = await scan_and_notify(
+                binance, notification_service, current_strategy, all_symbols, last_notified
+            )
+        cycle_num = 1
+        
+        # 主循环
+        last_learn_time = datetime.now()
+        
+        while True:
+            await asyncio.sleep(args.scan_interval)
+            
+            # 检查是否需要重新学习策略
+            time_since_learn = (datetime.now() - last_learn_time).total_seconds()
+            need_relearn = time_since_learn >= args.learn_interval
+            
+            if need_relearn:
+                cycle_num += 1
+                success, current_strategy, current_winrate = await run_learning_cycle(
+                    cycle_num, args, notification_service, binance
+                )
+                if success:
+                    last_learn_time = datetime.now()
+                    last_notified = set()  # 重置已通知集合
+                else:
+                    logger.warning("学习失败，继续使用上次策略")
+            
+            # 持续扫描品种
+            if current_strategy:
+                last_notified = await scan_and_notify(
+                    binance, notification_service, current_strategy, all_symbols, last_notified
+                )
+    
+    except KeyboardInterrupt:
+        logger.info("\n⏹️  用户中断程序，正在停止...")
+    except Exception as e:
+        logger.error(f"❌ 程序执行失败: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if binance:
+            await binance.close()
+        logger.info("👋 程序已退出")
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))

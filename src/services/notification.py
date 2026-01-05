@@ -572,10 +572,14 @@ class NotificationService:
         if self.enable_wechat:
             await self.send_wechat(message)
 
-    async def send_realtime_pump_alert(self, data: Dict):
+    async def send_realtime_pump_alert(self, data: Dict, is_strategy_learned: bool = False):
         """
         发送实时拉盘警报 (WebSocket 实时监控)
         优先发送到专用通道，如果没有配置专用通道则发送到主通道
+        
+        Args:
+            data: 警报数据
+            is_strategy_learned: 是否是策略学习后的信号
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         symbol = data['symbol']
@@ -588,7 +592,10 @@ class NotificationService:
         status_emoji = "🔴" if is_closed else "⚡"
         status_text = "已收盘" if is_closed else "实时"
         
-        message = f"""### 🚀 实时拉盘警报 {status_emoji}
+        # 添加策略学习标记
+        strategy_tag = "【策略学习】" if is_strategy_learned else ""
+        
+        message = f"""### 🚀 {strategy_tag}实时拉盘警报 {status_emoji}
         
 **币种**: **{symbol}** [{market_label}]
 **状态**: {status_text}
@@ -625,15 +632,23 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
             if self.enable_wechat:
                 await self.send_wechat(message)
 
-    async def send_steady_growth_alert(self, data: Dict, symbol: str):
+    async def send_steady_growth_alert(self, data: Dict, symbol: str, is_strategy_learned: bool = False):
         """
         发送稳步上涨警报 (Steady Growth)
         优先发送到专用通道，如果没有配置专用通道则发送到主通道
+        
+        Args:
+            data: 警报数据
+            symbol: 币种符号
+            is_strategy_learned: 是否是策略学习后的信号
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         price = data['price']
         
-        message = f"""### 💎 稳步上涨趋势确认
+        # 添加策略学习标记
+        strategy_tag = "【策略学习】" if is_strategy_learned else ""
+        
+        message = f"""### 💎 {strategy_tag}稳步上涨趋势确认
         
 **币种**: **{symbol}**
 **形态**: 均线多头排列 (MA20 > MA60)

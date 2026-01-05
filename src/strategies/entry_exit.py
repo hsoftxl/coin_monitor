@@ -5,16 +5,20 @@ import time
 from src.config import Config
 
 class EntryExitStrategy:
-    def __init__(self, min_total_flow: float = None, min_ratio: float = None):
+    def __init__(self, min_total_flow: float = None, min_ratio: float = None, 
+                 atr_sl_mult: float = None, atr_tp_mult: float = None, 
+                 min_consensus_bars: int = None, require_midband: bool = None, 
+                 min_interval_sec: float = None):
         self.min_total_flow = min_total_flow if min_total_flow is not None else Config.STRATEGY_MIN_TOTAL_FLOW
         self.min_ratio = min_ratio if min_ratio is not None else Config.STRATEGY_MIN_RATIO
-        self.min_interval_sec = getattr(Config, 'STRATEGY_MIN_INTERVAL_SEC', 900)
-        self.atr_sl_mult = getattr(Config, 'STRATEGY_ATR_SL_MULT', 1.5)
-        self.atr_tp_mult = getattr(Config, 'STRATEGY_ATR_TP_MULT', 2.0)
-        self.require_midband = getattr(Config, 'STRATEGY_REQUIRE_MIDBAND', True)
-        self.min_consensus_bars = getattr(Config, 'STRATEGY_MIN_CONSENSUS_BARS', 2)
+        self.min_interval_sec = min_interval_sec if min_interval_sec is not None else getattr(Config, 'STRATEGY_MIN_INTERVAL_SEC', 900)
+        self.atr_sl_mult = atr_sl_mult if atr_sl_mult is not None else getattr(Config, 'STRATEGY_ATR_SL_MULT', 1.5)
+        self.atr_tp_mult = atr_tp_mult if atr_tp_mult is not None else getattr(Config, 'STRATEGY_ATR_TP_MULT', 2.0)
+        self.require_midband = require_midband if require_midband is not None else getattr(Config, 'STRATEGY_REQUIRE_MIDBAND', True)
+        self.min_consensus_bars = min_consensus_bars if min_consensus_bars is not None else getattr(Config, 'STRATEGY_MIN_CONSENSUS_BARS', 2)
         self.last_action_time: Dict[str, float] = {}
         self.consensus_streak: Dict[str, int] = {}
+        self.is_strategy_learned = False  # 标识策略是否是学习后的
 
     def evaluate(self, platform_metrics: Dict[str, dict], consensus: str, signals: List[dict], symbol: str, df_5m: object = None, df_1h: object = None) -> Dict:
         """

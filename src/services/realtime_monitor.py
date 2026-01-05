@@ -16,7 +16,7 @@ class RealtimeMonitor:
     Supports both SPOT and FUTURES markets.
     """
     
-    def __init__(self, notification_service: Optional[NotificationService] = None):
+    def __init__(self, notification_service: Optional[NotificationService] = None, strategy=None):
         # Spot WebSocket
         self.spot_ws_url = "wss://stream.binance.com:9443/stream?streams="
         # Futures WebSocket
@@ -29,6 +29,7 @@ class RealtimeMonitor:
         self.futures_symbols = []
         self.msg_count = 0
         self.notification_service = notification_service
+        self.strategy = strategy  # 策略对象，用于判断是否是策略学习后的信号
         
         # Config
         self.pump_threshold = Config.REALTIME_PUMP_THRESHOLD
@@ -252,5 +253,7 @@ class RealtimeMonitor:
                 'market_type': market_type,
                 'market_label': market_label
             }
-            await self.notification_service.send_realtime_pump_alert(data)
+            # 检查策略是否是学习后的
+            is_strategy_learned = hasattr(self.strategy, 'is_strategy_learned') and self.strategy.is_strategy_learned
+            await self.notification_service.send_realtime_pump_alert(data, is_strategy_learned=is_strategy_learned)
 

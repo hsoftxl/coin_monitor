@@ -227,8 +227,6 @@ async def main():
     strategy = EntryExitStrategy()
     persistence = Persistence(Config.PERSIST_DB_PATH) if Config.ENABLE_PERSISTENCE else None
     
-    # ... (notification setup omitted) ...
-    
     # 初始化通知服务
     notification_service = None
     if Config.ENABLE_DINGTALK or Config.ENABLE_WECHAT:
@@ -243,9 +241,10 @@ async def main():
     
     # 启动实时 WebSocket 监控（后台任务）
     realtime_task = None
+    realtime_monitor = None
     if Config.ENABLE_REALTIME_MONITOR:
         logger.info("🚀 启动实时 WebSocket 监控...")
-        realtime_monitor = RealtimeMonitor(notification_service=notification_service)
+        realtime_monitor = RealtimeMonitor(notification_service=notification_service, strategy=strategy)
         realtime_task = asyncio.create_task(realtime_monitor.start())
         logger.info("✅ 实时监控已在后台运行")
 
@@ -323,6 +322,16 @@ async def main():
     finally:
         for conn in initialized.values():
             await conn.close()
+        
+        # 取消实时监控任务
+        if realtime_task:
+            realtime_task.cancel()
+            try:
+                await realtime_task
+            except asyncio.CancelledError:
+                logger.info("实时监控任务已取消")
+            except Exception as e:
+                logger.error(f"取消实时监控任务时出错: {e}")
 
 if __name__ == "__main__":
     try:

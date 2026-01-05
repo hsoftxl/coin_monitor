@@ -17,6 +17,8 @@
 - ✅ **24h 成交额显示**: 警报中包含 24h 成交额，一眼识别流动性
 - ✅ **动态风控策略**: 自动计算止损/止盈价格 (ATR 动态盈亏比)
 - ✅ **回测系统**: 内置历史数据回测脚本
+- ✅ **策略学习系统**: 自动学习高胜率策略并优化参数
+- ✅ **独立策略学习程序**: 持续运行的策略学习应用，自动筛选高胜率品种
 - ✅ **市场共识分析**: 基于多平台数据判断市场整体趋势
 - ✅ **巨鲸监控**: 实时捕捉大额交易（默认 $200k+）
 - ✅ **实时推送通知**: 支持钉钉和企业微信群机器人推送（A+/A/B+ 级信号）
@@ -393,7 +395,7 @@ asyncio.run(test())
 
 ---
 
-## � 回测系统
+## 📈 回测系统
 
 本系统内置了历史数据回测功能，用于验证策略在历史行情中的表现。
 
@@ -418,6 +420,96 @@ Latest 5 Trades:
 2025-12-28 14:30:00 SHORT PnL: -$200.00 (SL)
 ...
 ==================================================
+```
+
+---
+
+## 🤖 策略学习系统
+
+策略学习系统是一个自动学习高胜率策略的功能模块，它能够分析历史数据，找到最优的策略参数，并使用这些参数筛选出高胜率的交易品种。
+
+### 核心功能
+- ✅ **自动参数优化**: 通过网格搜索找到最优的策略参数
+- ✅ **持续运行**: 支持作为独立程序持续运行，定期更新策略
+- ✅ **品种筛选**: 根据最优策略筛选出高胜率的交易品种
+- ✅ **异步执行**: 在独立进程中运行，不阻塞主程序
+- ✅ **独立通知通道**: 策略学习通知使用独立的通知通道
+- ✅ **结果持久化**: 将最优策略参数保存到文件
+
+### 独立策略学习程序
+
+#### 运行方法
+```bash
+# 运行独立的策略学习程序
+python src/main_learn_app.py
+
+# 带参数运行
+python src/main_learn_app.py --days 7 --limit 100 --learn-interval 3600 --scan-interval 300
+```
+
+#### 参数说明
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--days` | 回测天数 | 7 |
+| `--limit` | 回测品种数量限制 | 100 |
+| `--learn-interval` | 策略学习间隔（秒） | 14400（4小时） |
+| `--scan-interval` | 品种扫描间隔（秒） | 300（5分钟） |
+| `--output` | 策略结果输出文件 | strategy_results.json |
+| `--no-notify` | 不发送通知 | 否 |
+
+### 策略学习配置
+
+编辑 `src/config.py` 中的策略学习相关配置：
+
+```python
+# ==================== 策略学习配置 ====================
+ENABLE_STRATEGY_LEARNING = True    # 是否启用策略学习
+STRATEGY_LEARNING_DAYS = 7         # 回测天数
+STRATEGY_LEARNING_INTERVAL_HOURS = 24  # 策略学习间隔（小时）
+MIN_WINRATE_THRESHOLD = 0.6        # 最小胜率阈值
+STRATEGY_LEARNING_LIMIT = 10       # 每次学习的最大品种数
+ENABLE_SINGLE_PLATFORM_TRAP_DETECTION = True  # 启用单平台诱多检测
+```
+
+### 通知配置
+
+策略学习通知使用独立的通知通道，需要在配置文件中设置：
+
+```python
+# 拉盘/稳步上涨专用通知通道（策略学习通知使用此通道）
+ENABLE_PUMP_GROWTH_CHANNEL = True
+# 钉钉专用通道（拉盘/稳步上涨/策略学习）
+PUMP_GROWTH_DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN"
+PUMP_GROWTH_DINGTALK_SECRET = "YOUR_SECRET"
+# 企业微信专用通道（拉盘/稳步上涨/策略学习）
+PUMP_GROWTH_WECHAT_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+```
+
+### 策略学习流程
+
+1. **数据获取**: 从 Binance 获取历史 K 线数据
+2. **参数优化**: 通过网格搜索找到最优的策略参数
+3. **策略生成**: 根据最优参数创建策略对象
+4. **品种筛选**: 使用最优策略筛选出高胜率的交易品种
+5. **通知发送**: 将结果发送到独立的通知通道
+6. **定期更新**: 按照配置的时间间隔重复上述过程
+
+### 策略学习结果示例
+
+```json
+{
+  "best_params": {
+    "min_total_flow": 200000,
+    "min_ratio": 2.0,
+    "atr_sl_mult": 1.5,
+    "atr_tp_mult": 2.5,
+    "min_consensus_bars": 2
+  },
+  "winrate": 0.65,
+  "learned_symbols": ["BTC/USDT", "ETH/USDT", "SOL/USDT"],
+  "timestamp": "2026-01-05 17:00:00",
+  "cycle": 1
+}
 ```
 
 ---
@@ -484,7 +576,7 @@ EXCHANGES = {
 ```
 coin_monitor/
 ├── src/
-│   ├── core/             # 核心模块（新增）
+│   ├── core/             # 核心模块
 │   │   ├── context.py    # AnalysisContext 上下文对象
 │   │   ├── symbol_processor.py  # 符号处理模块化函数
 │   │   └── exceptions.py # 自定义异常类
@@ -509,7 +601,9 @@ coin_monitor/
 │   │   └── entry_exit.py
 │   ├── services/         # 服务层
 │   │   ├── notification.py    # 通知服务
-│   │   └── realtime_monitor.py # 实时监控
+│   │   ├── realtime_monitor.py # 实时监控
+│   │   ├── strategy_learner.py # 策略学习服务
+│   │   └── symbol_selector.py  # 可交易品种筛选
 │   ├── storage/         # 存储层
 │   │   └── persistence.py
 │   ├── utils/            # 工具模块
@@ -518,16 +612,17 @@ coin_monitor/
 │   │   ├── indicators.py # 技术指标
 │   │   ├── market_regime.py # 市场环境
 │   │   ├── position_manager.py # 仓位管理
-│   │   └── dataframe_helpers.py # DataFrame辅助（新增）
+│   │   └── dataframe_helpers.py # DataFrame辅助
 │   ├── models.py         # 数据模型
 │   ├── config.py         # 配置文件
-│   └── main.py           # 主程序
-├── tests/                # 测试（新增）
+│   ├── main.py           # 主监控程序
+│   └── main_learn_app.py # 独立策略学习程序
+├── tests/                # 测试
 │   ├── conftest.py       # Pytest配置
 │   ├── test_analyzers.py
 │   ├── test_dataframe_helpers.py
 │   └── test_processor.py
-├── docs/                 # 文档（新增）
+├── docs/                 # 文档
 │   ├── ARCHITECTURE.md   # 架构文档
 │   └── API.md            # API文档
 └── README.md
@@ -537,9 +632,9 @@ coin_monitor/
 
 ---
 
-[//]: # (## 入群接收通知)
+# (## 入群接收通知)
 
-[//]: # (![扫码入群]&#40;group_400x600.jpg&#41;)
+# (![扫码入群]&#40;group_400x600.jpg&#41;)
 
 ---
 

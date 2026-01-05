@@ -54,3 +54,35 @@ class TakerFlowAnalyzer:
             'resistance_high': resistance_high,
             'atr': atr
         }
+    
+    def analyze_df_batch(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Analyzes a batch of data and adds the required columns to the DataFrame.
+        """
+        if df.empty:
+            return df
+        
+        # Calculate taker buy and sell volumes in USDT
+        df['taker_buy_usdt'] = df['taker_buy_quote_asset_volume']
+        df['taker_sell_usdt'] = df['quote_volume'] - df['taker_buy_quote_asset_volume']
+        df['net_flow_usdt'] = df['taker_buy_usdt'] - df['taker_sell_usdt']
+        
+        # Calculate cumulative net flow using rolling window
+        df['cumulative_net_flow'] = df['net_flow_usdt'].rolling(window=self.window).sum()
+        
+        # Calculate buy/sell ratio
+        df['buy_sell_ratio'] = df['taker_buy_usdt'] / df['taker_sell_usdt'].replace(0, float('inf'))
+        df['buy_sell_ratio'] = df['buy_sell_ratio'].replace(float('inf'), 0)
+        
+        # Calculate ATR
+        df['prev_close'] = df['close'].shift(1)
+        df['tr1'] = df['high'] - df['low']
+        df['tr2'] = (df['high'] - df['prev_close']).abs()
+        df['tr3'] = (df['low'] - df['prev_close']).abs()
+        df['true_range'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+        df['atr'] = df['true_range'].rolling(window=14).mean()
+        
+        # Drop temporary columns
+        df.drop(['prev_close', 'tr1', 'tr2', 'tr3', 'true_range'], axis=1, inplace=True)
+        
+        return df

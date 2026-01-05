@@ -157,4 +157,11 @@ class Config:
     
     # ==================== 多平台共识配置 (P0新增) ====================
     MIN_EXCHANGE_CONSENSUS = 2         # 至少需要N个交易所确认
+
+    # ==================== 策略学习配置 (新增) ====================
+    ENABLE_STRATEGY_LEARNING = True    # 是否启用策略学习
+    STRATEGY_LEARNING_DAYS = 7         # 回测天数
+    STRATEGY_LEARNING_INTERVAL_HOURS = 24  # 策略学习间隔（小时）
+    MIN_WINRATE_THRESHOLD = 0.6        # 最小胜率阈值
+    STRATEGY_LEARNING_LIMIT = 10       # 每次学习的最大品种数
     ENABLE_SINGLE_PLATFORM_TRAP_DETECTION = True  # 启用单平台诱多检测

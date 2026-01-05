@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional, Any
 import pandas as pd
 from src.utils.logger import logger
 
@@ -7,7 +7,13 @@ class MultiPlatformAnalyzer:
     Aggregates signals from multiple exchanges.
     """
     
-    def analyze_signals(self, platform_metrics: Dict[str, dict], symbol: str = "UNKNOWN", df_5m: pd.DataFrame = None, df_1h: pd.DataFrame = None) -> List[dict]:
+    def analyze_signals(
+        self, 
+        platform_metrics: Dict[str, Dict[str, Any]], 
+        symbol: str = "UNKNOWN", 
+        df_5m: Optional[pd.DataFrame] = None, 
+        df_1h: Optional[pd.DataFrame] = None
+    ) -> List[Dict[str, Any]]:
         """
         platform_metrics: { 'binance': {'cumulative_net_flow': ..., 'buy_sell_ratio': ...}, ... }
         """
@@ -17,20 +23,25 @@ class MultiPlatformAnalyzer:
         trend_5m = "NEUTRAL"
         trend_1h = "NEUTRAL"
         
+        # Optimized DataFrame access
+        from src.utils.dataframe_helpers import get_latest_value
+        
         if df_5m is not None and not df_5m.empty:
             # Simple MA trend or Price vs MA
             # Assuming df has 'close' and maybe 'ma' if computed, or compute here
             # Let's compute a quick SMA20 if not present
-            close = df_5m['close'].iloc[-1]
-            sma20 = df_5m['close'].rolling(20).mean().iloc[-1]
+            close = get_latest_value(df_5m, 'close', 0.0)
+            sma20_series = df_5m['close'].rolling(20).mean()
+            sma20 = get_latest_value(pd.DataFrame({'close': sma20_series}), 'close', 0.0)
             if close > sma20:
                 trend_5m = "BULLISH"
             elif close < sma20:
                 trend_5m = "BEARISH"
                 
         if df_1h is not None and not df_1h.empty:
-            close = df_1h['close'].iloc[-1]
-            sma20 = df_1h['close'].rolling(20).mean().iloc[-1]
+            close = get_latest_value(df_1h, 'close', 0.0)
+            sma20_series = df_1h['close'].rolling(20).mean()
+            sma20 = get_latest_value(pd.DataFrame({'close': sma20_series}), 'close', 0.0)
             if close > sma20:
                 trend_1h = "BULLISH"
             elif close < sma20:
@@ -126,7 +137,7 @@ class MultiPlatformAnalyzer:
              
         return signals
 
-    def get_market_consensus(self, platform_metrics: Dict[str, dict]) -> str:
+    def get_market_consensus(self, platform_metrics: Dict[str, Dict[str, Any]]) -> str:
         """
         Returns a high-level summary string based on flows.
         """

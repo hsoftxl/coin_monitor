@@ -4,10 +4,16 @@ import hashlib
 import base64
 import urllib.parse
 import aiohttp
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 from datetime import datetime
 from src.utils.logger import logger
 from src.config import Config
+
+# 延迟导入异常类，避免循环导入
+if TYPE_CHECKING:
+    from src.core.exceptions import NotificationError
+else:
+    NotificationError = Exception  # 运行时占位符
 
 
 class NotificationService:
@@ -16,12 +22,19 @@ class NotificationService:
     """
     
     def __init__(self):
+        # 主通道配置
         self.dingtalk_webhook = Config.DINGTALK_WEBHOOK
         self.dingtalk_secret = Config.DINGTALK_SECRET
         self.wechat_webhook = Config.WECHAT_WEBHOOK
         self.enable_dingtalk = Config.ENABLE_DINGTALK
         self.enable_wechat = Config.ENABLE_WECHAT
         self.notify_grades = Config.NOTIFY_GRADES
+        
+        # 拉盘/稳步上涨专用通道配置
+        self.enable_pump_growth_channel = Config.ENABLE_PUMP_GROWTH_CHANNEL
+        self.pump_growth_dingtalk_webhook = Config.PUMP_GROWTH_DINGTALK_WEBHOOK
+        self.pump_growth_dingtalk_secret = Config.PUMP_GROWTH_DINGTALK_SECRET
+        self.pump_growth_wechat_webhook = Config.PUMP_GROWTH_WECHAT_WEBHOOK
         
         # 消息队列（用于 B 级信号汇总）
         self.pending_b_signals = []
@@ -40,20 +53,30 @@ class NotificationService:
         sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
         return sign
     
-    async def send_dingtalk(self, message: str, at_all: bool = False) -> bool:
+    async def send_dingtalk(self, message: str, at_all: bool = False, webhook: str = None, secret: str = None) -> bool:
         """
         发送钉钉消息
+        
+        Args:
+            message: 消息内容
+            at_all: 是否@所有人
+            webhook: 自定义webhook URL（如果为None，使用默认webhook）
+            secret: 自定义secret（如果为None，使用默认secret）
         """
-        if not self.enable_dingtalk or not self.dingtalk_webhook:
+        # 使用自定义webhook或默认webhook
+        target_webhook = webhook or self.dingtalk_webhook
+        target_secret = secret or self.dingtalk_secret
+        
+        if not target_webhook:
             return False
         
         try:
             # 构建 URL（含加签）
             timestamp = int(time.time() * 1000)
-            url = self.dingtalk_webhook
+            url = target_webhook
             
-            if self.dingtalk_secret:
-                sign = self._generate_dingtalk_sign(timestamp, self.dingtalk_secret)
+            if target_secret:
+                sign = self._generate_dingtalk_sign(timestamp, target_secret)
                 url = f"{url}&timestamp={timestamp}&sign={sign}"
             
             # 构建消息体
@@ -79,15 +102,25 @@ class NotificationService:
                         logger.error(f"❌ 钉钉消息发送失败: {result}")
                         return False
         
-        except Exception as e:
+        except (aiohttp.ClientError, ValueError, KeyError) as e:
             logger.error(f"❌ 钉钉推送异常: {e}")
-            return False
+            raise NotificationError(f"Failed to send DingTalk notification: {e}") from e
+        except Exception as e:
+            logger.error(f"❌ 钉钉推送未知异常: {e}")
+            raise NotificationError(f"Unexpected error in DingTalk notification: {e}") from e
     
-    async def send_wechat(self, message: str) -> bool:
+    async def send_wechat(self, message: str, webhook: str = None) -> bool:
         """
         发送企业微信消息
+        
+        Args:
+            message: 消息内容
+            webhook: 自定义webhook URL（如果为None，使用默认webhook）
         """
-        if not self.enable_wechat or not self.wechat_webhook:
+        # 使用自定义webhook或默认webhook
+        target_webhook = webhook or self.wechat_webhook
+        
+        if not target_webhook:
             return False
         
         try:
@@ -101,7 +134,7 @@ class NotificationService:
             
             # 发送请求
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.wechat_webhook, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.post(target_webhook, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     result = await resp.json()
                     if result.get('errcode') == 0:
                         logger.info("✅ 企业微信消息发送成功")
@@ -110,9 +143,15 @@ class NotificationService:
                         logger.error(f"❌ 企业微信消息发送失败: {result}")
                         return False
         
-        except Exception as e:
+        except (aiohttp.ClientError, ValueError, KeyError) as e:
             logger.error(f"❌ 企业微信推送异常: {e}")
-            return False
+            # 动态导入异常类
+            from src.core.exceptions import NotificationError
+            raise NotificationError(f"Failed to send WeChat notification: {e}") from e
+        except Exception as e:
+            logger.error(f"❌ 企业微信推送未知异常: {e}")
+            from src.core.exceptions import NotificationError
+            raise NotificationError(f"Unexpected error in WeChat notification: {e}") from e
     
     def format_signal_message(self, signal: Dict, platform_metrics: Dict, symbol: str) -> str:
         """
@@ -437,10 +476,8 @@ class NotificationService:
     async def send_early_pump_alert(self, data: Dict, symbol: str):
         """
         发送主力拉盘初期警报 (A+级)
+        优先发送到专用通道，如果没有配置专用通道则发送到主通道
         """
-        if not (self.enable_dingtalk or self.enable_wechat):
-            return
-
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pct = data['pct_change']
         vol = data['vol_ratio']
@@ -473,12 +510,23 @@ class NotificationService:
 """
         logger.critical(f"🚀 触发主力拉盘警报 [{symbol}]，立即推送！")
         
-        # A+级信号，强制推送
-        if self.enable_dingtalk:
-            await self.send_dingtalk(message, at_all=True)
-            
-        if self.enable_wechat:
-            await self.send_wechat(message)
+        # 优先发送到专用通道
+        if self.enable_pump_growth_channel:
+            if self.pump_growth_dingtalk_webhook:
+                await self.send_dingtalk(
+                    message, 
+                    at_all=True, 
+                    webhook=self.pump_growth_dingtalk_webhook,
+                    secret=self.pump_growth_dingtalk_secret
+                )
+            if self.pump_growth_wechat_webhook:
+                await self.send_wechat(message, webhook=self.pump_growth_wechat_webhook)
+        else:
+            # 如果没有配置专用通道，发送到主通道
+            if self.enable_dingtalk:
+                await self.send_dingtalk(message, at_all=True)
+            if self.enable_wechat:
+                await self.send_wechat(message)
 
     async def send_panic_dump_alert(self, data: Dict, symbol: str):
         """
@@ -527,10 +575,8 @@ class NotificationService:
     async def send_realtime_pump_alert(self, data: Dict):
         """
         发送实时拉盘警报 (WebSocket 实时监控)
+        优先发送到专用通道，如果没有配置专用通道则发送到主通道
         """
-        if not (self.enable_dingtalk or self.enable_wechat):
-            return
-
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         symbol = data['symbol']
         pct = data['change_pct']
@@ -561,21 +607,29 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 """
         logger.info(f"📢 触发实时拉盘警报 [{symbol} {market_label}]，推送通知...")
         
-        # 实时信号，高优先级推送
-        if self.enable_dingtalk:
-            await self.send_dingtalk(message, at_all=True)
-            
-            
-        if self.enable_wechat:
-            await self.send_wechat(message)
+        # 优先发送到专用通道
+        if self.enable_pump_growth_channel:
+            if self.pump_growth_dingtalk_webhook:
+                await self.send_dingtalk(
+                    message, 
+                    at_all=True, 
+                    webhook=self.pump_growth_dingtalk_webhook,
+                    secret=self.pump_growth_dingtalk_secret
+                )
+            if self.pump_growth_wechat_webhook:
+                await self.send_wechat(message, webhook=self.pump_growth_wechat_webhook)
+        else:
+            # 如果没有配置专用通道，发送到主通道
+            if self.enable_dingtalk:
+                await self.send_dingtalk(message, at_all=True)
+            if self.enable_wechat:
+                await self.send_wechat(message)
 
     async def send_steady_growth_alert(self, data: Dict, symbol: str):
         """
         发送稳步上涨警报 (Steady Growth)
+        优先发送到专用通道，如果没有配置专用通道则发送到主通道
         """
-        if not (self.enable_dingtalk or self.enable_wechat):
-            return
-
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         price = data['price']
         
@@ -603,11 +657,23 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 """
         logger.info(f"💎 触发稳步上涨警报 [{symbol}]，推送通知...")
         
-        if self.enable_dingtalk:
-            await self.send_dingtalk(message, at_all=False)
-            
-        if self.enable_wechat:
-            await self.send_wechat(message)
+        # 优先发送到专用通道
+        if self.enable_pump_growth_channel:
+            if self.pump_growth_dingtalk_webhook:
+                await self.send_dingtalk(
+                    message, 
+                    at_all=False, 
+                    webhook=self.pump_growth_dingtalk_webhook,
+                    secret=self.pump_growth_dingtalk_secret
+                )
+            if self.pump_growth_wechat_webhook:
+                await self.send_wechat(message, webhook=self.pump_growth_wechat_webhook)
+        else:
+            # 如果没有配置专用通道，发送到主通道
+            if self.enable_dingtalk:
+                await self.send_dingtalk(message, at_all=False)
+            if self.enable_wechat:
+                await self.send_wechat(message)
 
     def _format_24h_vol(self, vol_24h: float) -> str:
         if not vol_24h:

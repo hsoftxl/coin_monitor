@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 from loguru import logger
 from src.config import Config
@@ -23,247 +23,133 @@ from src.strategies.entry_exit import EntryExitStrategy
 from src.analyzers.steady_growth import SteadyGrowthAnalyzer
 from src.storage.persistence import Persistence
 from src.utils.market_regime import MarketRegimeDetector
+from src.core.context import AnalysisContext
+from src.core.symbol_processor import (
+    fetch_symbol_data,
+    analyze_platform,
+    aggregate_signals,
+    generate_recommendations
+)
+from src.core.exceptions import ExchangeConnectionError, DataFetchError
 
-async def process_symbol(symbol: str, connectors: Dict, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, market_regime='NEUTRAL', notification_service=None, persistence=None):
+async def process_symbol(symbol: str, ctx: AnalysisContext) -> None:
     """
     Process a single symbol across all exchanges.
+    
+    使用模块化函数重构，提高代码可维护性。
+    
+    Args:
+        symbol: Trading pair symbol (e.g., 'BTC/USDT')
+        ctx: AnalysisContext containing all analyzers and services
     """
-    # 0. Pre-filter: Check which exchanges support this symbol
-    valid_connectors = {}
-    for name, conn in connectors.items():
-        try:
-            if not (conn.exchange and conn.exchange.markets):
-                continue
-            if symbol in conn.exchange.symbols:
-                valid_connectors[name] = conn
-            elif name == 'coinbase':
-                usd_symbol = symbol.replace('/USDT', '/USD')
-                if usd_symbol in conn.exchange.symbols:
-                    valid_connectors[name] = conn
-        except Exception:
-            pass
+    # 1. Fetch all data
+    data = await fetch_symbol_data(symbol, ctx)
+    valid_connectors = data['valid_connectors']
     
     if not valid_connectors:
-        # No exchange supports this symbol, skip silently
         return
     
-    # 1. Fetch Data (only from valid exchanges)
-    # Fetch 1m Candles (main data)
-    tasks = {
-        name: conn.fetch_standard_candles(symbol=symbol, limit=Config.LIMIT_KLINE) 
-        for name, conn in valid_connectors.items()
-    }
-    results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+    candle_results = data['candle_results']
+    ticker_24h_vol = data['ticker_24h_vol']
+    df_res = data['df_res']
+    trade_results = data['trade_results']
+    spot_df = data['spot_df']
+    futures_df = data['futures_df']
     
-    
-    # Fetch 24h Ticker (for Volume display)
-    ticker_24h_vol = 0
-    if valid_connectors:
-        first_conn = list(valid_connectors.values())[0]
-        try:
-             ticker = await first_conn.fetch_ticker(symbol)
-             ticker_24h_vol = ticker.get('quoteVolume', 0)
-             # Fallback if quoteVolume is None/0 but baseVolume exists
-             if not ticker_24h_vol and ticker.get('baseVolume') and ticker.get('last'):
-                 ticker_24h_vol = ticker['baseVolume'] * ticker['last']
-        except Exception:
-             pass
-
-    # Fetch Multi-Timeframe Data (for Resonance)
-    df_res = None
-    if Config.ENABLE_MULTI_TIMEFRAME and valid_connectors:
-        # Use first available connector for MTF data
-        first_conn = list(valid_connectors.values())[0]
-        try:
-            # Fetch Resonance Timeframe (15m)
-            data_res = await first_conn.fetch_candles_timeframe(symbol, Config.MTF_RES_TIMEFRAME, limit=100)
-            if data_res:
-                df_res = DataProcessor.process_candles(data_res)
-        except Exception as e:
-            logger.debug(f"[{symbol}] 共振数据({Config.MTF_RES_TIMEFRAME})获取失败: {e}")
-    
-    # Fetch Spot-Futures Data (for correlation analysis)
-    spot_df = None
-    futures_df = None
-    if Config.ENABLE_SPOT_FUTURES_CORRELATION and 'binance' in valid_connectors:
-        try:
-            # Fetch spot data (already have from main fetch above)
-            # Fetch futures data (USDT perpetual)
-            futures_symbol = symbol  # Most are same symbol for perpetuals
-            conn = valid_connectors['binance']
-            # Try to fetch from futures market
-            # Note: This requires the exchange to support futures
-            # For simplicity, we'll skip if not available
-            pass  # Will implement if futures API available
-        except Exception:
-            pass
-    
-    # Fetch Trades (Best effort for Whale Watcher)
-    trade_tasks = {
-         name: conn.fetch_trades(symbol=symbol, limit=100)
-         for name, conn in valid_connectors.items()
-    }
-    trade_results = await asyncio.gather(*trade_tasks.values(), return_exceptions=True)
-
-    platform_metrics: Dict[str, dict] = {}
-    valid_data_count = 0
-    
-    # Spot-Futures Correlation Analysis (using first valid platform)
+    # Spot-Futures Correlation Analysis
     sf_correlation = None
     if Config.ENABLE_SPOT_FUTURES_CORRELATION and spot_df is not None and futures_df is not None:
-        sf_correlation = sf_analyzer.analyze_correlation(spot_df, futures_df, symbol)
+        sf_correlation = ctx.sf_analyzer.analyze_correlation(spot_df, futures_df, symbol)
     
     # 2. Analyze Individual Platforms
-    for i, (name, _) in enumerate(tasks.items()):
-        res = results[i]
+    platform_metrics: Dict[str, Dict[str, Any]] = {}
+    valid_data_count = 0
+    main_df = None
+    volatility_level = 'NORMAL'
+    
+    # Create tasks dict for iteration
+    tasks_dict = dict(zip(valid_connectors.keys(), candle_results))
+    
+    for i, (name, res) in enumerate(tasks_dict.items()):
         if isinstance(res, Exception) or not res or len(res) < 5:
-            # logger.warning(f"[{symbol}] {name} 无数据或数据不足: {res}")
             continue
         
         valid_data_count += 1
+        trade_result = trade_results[i] if i < len(trade_results) else None
         
-        # Standardize & Flow
-        df = DataProcessor.process_candles(res)
-        metrics = taker_analyzer.analyze(df)
-        platform_metrics[name] = metrics
+        # Analyze platform
+        analysis_result = await analyze_platform(
+            symbol=symbol,
+            platform_name=name,
+            candle_result=res,
+            trade_result=trade_result,
+            ticker_24h_vol=ticker_24h_vol,
+            df_res=df_res,
+            sf_correlation=sf_correlation,
+            ctx=ctx
+        )
         
-        # Volume Spike Analysis
-        spike = vol_spike_analyzer.analyze(df, symbol)
-        if spike:
-             spike['vol_24h'] = ticker_24h_vol
-             logger.warning(f"🔥 [{symbol}] 成交量暴增: {spike['ratio']:.1f}x (涨幅 {spike['price_change']:.2f}%)")
-             if notification_service:
-                 await notification_service.send_volume_spike_alert(spike, symbol)
-                 
-        # Whale Analysis (for Confirmation)
-        current_whales = []
+        if analysis_result['metrics']:
+            platform_metrics[name] = analysis_result['metrics']
+            if analysis_result.get('df') is not None:
+                main_df = analysis_result['df']
+        
+        # Extract volatility level from signals
+        for signal_type, signal_data in analysis_result.get('signals', []):
+            if signal_type in ('early_pump', 'panic_dump') and 'volatility_level' in signal_data:
+                volatility_level = signal_data['volatility_level']
+                break
+        
+    if valid_data_count < 2:
+        return
+    
+    # 3. Aggregate signals and consensus
+    aggregation_result = await aggregate_signals(
+        symbol=symbol,
+        platform_metrics=platform_metrics,
+        df=main_df,
+        df_res=df_res,
+        ctx=ctx
+    )
+    
+    consensus = aggregation_result['consensus']
+    signals = aggregation_result['signals']
+    
+    # Process signals
+    for signal in signals:
+        logger.critical(f"🚨 [{symbol}] 信号触发 [{signal['grade']}]: {signal['type']} - {signal['desc']}")
+        if ctx.notification_service:
+            await ctx.notification_service.dispatch_signal(signal, platform_metrics, symbol)
+        if ctx.persistence:
+            ctx.persistence.save_signal(signal, platform_metrics, symbol)
+    
+    # 4. Generate recommendations
+    await generate_recommendations(
+        symbol=symbol,
+        consensus=consensus,
+        signals=signals,
+        platform_metrics=platform_metrics,
+        df=main_df,
+        df_res=df_res,
+        volatility_level=volatility_level,
+        ctx=ctx
+    )
+    
+    # 5. Whale Watcher (separate loop for all trades)
+    for i, (name, _) in enumerate(valid_connectors.items()):
         if i < len(trade_results):
             t_res = trade_results[i]
             if isinstance(t_res, list) and t_res:
-                current_whales = whale_watcher.check_trades(t_res)
-
-        # Early Pump Analysis (Enhanced with Resonance + SF correlation + Whales)
-        sf_strength = sf_correlation['strength'] if sf_correlation else None
-        pump = early_pump_analyzer.analyze(
-            df, 
-            symbol,
-            df_res=df_res,
-            sf_strength=sf_strength,
-            whales=current_whales
-        )
-        if pump:
-             pump['vol_24h'] = ticker_24h_vol
-             logger.critical(f"[{symbol}] {pump['desc']}")
-             if notification_service:
-                 await notification_service.send_early_pump_alert(pump, symbol)
-
-        # Panic Dump Analysis (启用做空 - P1优化)
-        # 仅在熊市或 Config.SHORT_ONLY_IN_BEAR=False 时允许
-        allow_short = True
-        if Config.SHORT_ONLY_IN_BEAR and market_regime not in ['BEAR', 'NEUTRAL_BEAR']:
-            allow_short = False
-            
-        dump = None
-        if allow_short:
-            dump = panic_dump_analyzer.analyze(
-                df,
-                symbol,
-                df_res=df_res,
-                sf_strength=sf_strength,
-                whales=current_whales
-            )
-            
-        if dump:
-             dump['vol_24h'] = ticker_24h_vol
-             logger.critical(f"📉 [{symbol}] {dump['desc']}")
-             if notification_service:
-                 await notification_service.send_panic_dump_alert(dump, symbol)
-
-        # Steady Growth Analysis (Slow Track - 15m)
-        steady = steady_growth_analyzer.analyze(df_res, symbol)
-        if steady:
-             steady['vol_24h'] = ticker_24h_vol
-             logger.info(f"💎 [{symbol}] {steady['desc']}")
-             if notification_service:
-                 await notification_service.send_steady_growth_alert(steady, symbol)
-        
-    if valid_data_count < 2:
-        return # Skip if not enough data for consensus
-
-    # 3. Consensus & Signals
-    consensus = multi_analyzer.get_market_consensus(platform_metrics)
-    
-    # Log Output (Compact for multiple symbols)
-    # Only log if there is significant activity or divergence? 
-    # Or simple table row style.
-    # [ETH/USDT] CONSENSUS: BULLISH | Bin: +10M | OKX: +5M ...
-    
-    log_parts = []
-    total_flow = 0
-    for name, m in platform_metrics.items():
-        flow = m['cumulative_net_flow']
-        total_flow += flow
-        tag = "green" if flow > 0 else "red"
-        # Shorten name: BINANCE->BIN
-        short_name = name[:3].upper()
-        log_parts.append(f"{short_name}:<{tag}>{flow/1000:.0f}k</{tag}>")
-    
-    # Determine consensus color
-    cons_tag = "white"
-    if "看涨" in consensus or "BULLISH" in consensus: cons_tag = "green"
-    elif "看跌" in consensus or "BEARISH" in consensus: cons_tag = "red"
-    
-    logger.info(f"💰 <bold>{symbol.ljust(9)}</bold> | 共识: <{cons_tag}>{consensus.split('(')[0]}</{cons_tag}> | {' | '.join(log_parts)}")
-    
-    # 推送市场共识通知（强力看涨/看跌）
-    if notification_service:
-        await notification_service.send_consensus_alert(consensus, platform_metrics, symbol)
-
-    # 4. Signals
-    # 4. Signals
-    signals = multi_analyzer.analyze_signals(platform_metrics, symbol=symbol, df_5m=df, df_1h=df_res)
-    for signal in signals:
-        logger.critical(f"🚨 [{symbol}] 信号触发 [{signal['grade']}]: {signal['type']} - {signal['desc']}")
-        
-        # 推送通知
-        if notification_service:
-            await notification_service.dispatch_signal(signal, platform_metrics, symbol)
-        if persistence:
-            persistence.save_signal(signal, platform_metrics, symbol)
-
-    # 4.1 Strategy
-    # 4.1 Strategy
-    rec = strategy.evaluate(platform_metrics, consensus, signals, symbol, df_5m=df, df_1h=df_res)
-    
-    # 尝试从 analyze 结果中获取波动率等级 (如果之前有 pump/dump 分析)
-    vol_level = 'NORMAL'
-    if 'pump' in locals() and pump and 'volatility_level' in pump:
-        vol_level = pump['volatility_level']
-    elif 'dump' in locals() and dump and 'volatility_level' in dump:
-        vol_level = dump['volatility_level']
-        
-    pos = strategy.compute_position(rec, volatility_level=vol_level) if rec.get('action') else {}
-    rec.update(pos)
-    if rec.get('action') and rec.get('size_base'): # Only verify if size calculated
-        logger.info(f"🎯 [{symbol}] 策略建议: {rec['action']} {rec['side']} @ {rec['price']:.4f} Size={rec.get('size_base'):.4f} ({rec.get('notional_usd'):.0f}U)")
-        if notification_service:
-            await notification_service.send_strategy_recommendation(rec, platform_metrics)
-        if persistence:
-            persistence.save_recommendation(rec, platform_metrics)
-    # 5. Whale Watcher
-    for i, (name, _) in enumerate(trade_tasks.items()):
-        t_res = trade_results[i]
-        if isinstance(t_res, list) and t_res:
-            whales = whale_watcher.check_trades(t_res)
-            for w in whales:
-                 side = w['side'].upper()
-                 side_cn = "买入" if side == 'BUY' else "卖出"
-                 color = "green" if side == 'BUY' else "red"
-                 logger.warning(f"🐳 [{symbol}] 巨鲸监测 [{name.upper()}]: <{color}>{side_cn} ${w['cost']:,.0f}</{color}> @ {w['price']}")
-                 
-                 # 推送巨鲸通知
-                 if notification_service:
-                     await notification_service.send_whale_alert(w, symbol, name)
+                whales = ctx.whale_watcher.check_trades(t_res)
+                for w in whales:
+                    side = w['side'].upper()
+                    side_cn = "买入" if side == 'BUY' else "卖出"
+                    color = "green" if side == 'BUY' else "red"
+                    logger.warning(f"🐳 [{symbol}] 巨鲸监测 [{name.upper()}]: <{color}>{side_cn} ${w['cost']:,.0f}</{color}> @ {w['price']}")
+                    
+                    # 推送巨鲸通知
+                    if ctx.notification_service:
+                        await ctx.notification_service.send_whale_alert(w, symbol, name)
 
 
 async def main():
@@ -371,25 +257,53 @@ async def main():
             cycle_start = time.time()
             logger.info(f"=== 开始新一轮扫描 ({len(target_symbols)} 币种) ===")
             
-            # P1: 获取市场环境 (Based on BTC)
+            # P1: 获取市场环境 (Based on BTC) - 使用缓存机制
             market_regime = 'NEUTRAL'
-            try:
-                # 优先使用 Binance
-                regime_conn = initialized.get('binance') or list(initialized.values())[0]
-                if regime_conn:
-                    btc_candles = await regime_conn.fetch_standard_candles('BTC/USDT', limit=100)
-                    if btc_candles:
-                        btc_df = DataProcessor.process_candles(btc_candles)
-                        regime_info = market_regime_detector.analyze(btc_df)
-                        market_regime = regime_info['regime']
-                        logger.info(f"📊 全局市场环境: {regime_info['desc']}")
-            except Exception as e:
-                logger.warning(f"无法获取市场环境数据: {e}")
+            # 先检查缓存
+            cached_result = market_regime_detector.get_cached_result()
+            if cached_result:
+                market_regime = cached_result['regime']
+                logger.debug(f"📊 使用缓存的市场环境: {cached_result['desc']}")
+            else:
+                # 缓存过期，需要重新获取数据
+                try:
+                    # 优先使用 Binance
+                    regime_conn = initialized.get('binance') or list(initialized.values())[0]
+                    if regime_conn:
+                        btc_candles = await regime_conn.fetch_standard_candles('BTC/USDT', limit=100)
+                        if btc_candles:
+                            btc_df = DataProcessor.process_candles(btc_candles)
+                            regime_info = market_regime_detector.analyze(btc_df)
+                            market_regime = regime_info['regime']
+                            logger.info(f"📊 全局市场环境: {regime_info['desc']}")
+                except Exception as e:
+                    logger.warning(f"无法获取市场环境数据: {e}")
+                    # 如果获取失败，尝试使用过期缓存
+                    if market_regime_detector._cache:
+                        market_regime = market_regime_detector._cache['regime']
+                        logger.warning(f"使用过期缓存的市场环境: {market_regime_detector._cache['desc']}")
+            
+            # Create analysis context
+            ctx = AnalysisContext(
+                connectors=initialized,
+                taker_analyzer=taker_analyzer,
+                multi_analyzer=multi_analyzer,
+                whale_watcher=whale_watcher,
+                vol_spike_analyzer=vol_spike_analyzer,
+                early_pump_analyzer=early_pump_analyzer,
+                panic_dump_analyzer=panic_dump_analyzer,
+                steady_growth_analyzer=steady_growth_analyzer,
+                sf_analyzer=sf_analyzer,
+                strategy=strategy,
+                notification_service=notification_service,
+                persistence=persistence,
+                market_regime=market_regime
+            )
             
             # Process symbols in chunks of 5 to control concurrency
             for i in range(0, len(target_symbols), 5):
                 chunk = target_symbols[i:i+5]
-                tasks = [process_symbol(sym, initialized, taker_analyzer, multi_analyzer, whale_watcher, vol_spike_analyzer, early_pump_analyzer, panic_dump_analyzer, steady_growth_analyzer, sf_analyzer, strategy, market_regime, notification_service, persistence) for sym in chunk]
+                tasks = [process_symbol(sym, ctx) for sym in chunk]
                 await asyncio.gather(*tasks)
 
                 # Small sleep between chunks to be nice to APIs

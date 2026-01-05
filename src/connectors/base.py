@@ -6,6 +6,17 @@ from src.utils.logger import logger
 from src.config import Config
 from src.models import StandardCandle
 
+# 延迟导入异常类，避免循环导入
+# 在需要时动态导入
+def _get_exceptions():
+    """延迟导入异常类，避免循环导入"""
+    try:
+        from src.core.exceptions import ExchangeConnectionError, DataFetchError
+        return ExchangeConnectionError, DataFetchError
+    except ImportError:
+        # 如果导入失败，使用通用异常
+        return Exception, Exception
+
 class ExchangeConnector(ABC):
     """
     Abstract base class for exchange connectors using CCXT async support.
@@ -99,12 +110,16 @@ class ExchangeConnector(ABC):
                 logger.warning(f"[{self.exchange_id}] Request failed (Attempt {attempt+1}/{retries}): {e}")
                 if attempt == retries - 1:
                     logger.error(f"[{self.exchange_id}] All retry attempts failed.")
-                    raise
+                    # 使用延迟导入的异常类
+                    _, DataFetchError = _get_exceptions()
+                    raise DataFetchError(f"Failed to fetch data from {self.exchange_id} after {retries} attempts: {e}") from e
                 await asyncio.sleep(delay)
                 delay *= 2
             except Exception as e:
                 logger.error(f"[{self.exchange_id}] Unexpected error: {e}")
-                raise
+                # 使用延迟导入的异常类
+                _, DataFetchError = _get_exceptions()
+                raise DataFetchError(f"Unexpected error in {self.exchange_id}: {e}") from e
 
     def resolve_symbol(self, symbol: str) -> str:
         """
@@ -117,5 +132,5 @@ class ExchangeConnector(ABC):
         resolved = self.resolve_symbol(symbol)
         try:
             return bool(self.exchange and resolved in self.exchange.symbols)
-        except Exception:
+        except (AttributeError, KeyError, TypeError):
             return False

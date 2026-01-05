@@ -74,6 +74,26 @@ class DataProcessor:
     def align_dataframes(dfs: List[pd.DataFrame]) -> pd.DataFrame:
         """
         Merges multiple exchange DataFrames on timestamp index.
+        
+        Args:
+            dfs: List of DataFrames to align
+            
+        Returns:
+            Merged DataFrame with aligned timestamps
+            
+        Note:
+            Currently not used by MultiPlatformAnalyzer, but kept for future use.
+            Each platform is analyzed independently and results are aggregated.
         """
-        # TODO: Implement alignment if needed for MultiPlatformAnalyzer
-        pass
+        if not dfs:
+            return pd.DataFrame()
+        
+        if len(dfs) == 1:
+            return dfs[0]
+        
+        # Merge on timestamp index
+        merged = dfs[0]
+        for df in dfs[1:]:
+            merged = merged.join(df, how='outer', rsuffix=f'_{len(merged.columns)}')
+        
+        return merged.sort_index()

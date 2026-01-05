@@ -484,24 +484,56 @@ EXCHANGES = {
 ```
 coin_monitor/
 ├── src/
+│   ├── core/             # 核心模块（新增）
+│   │   ├── context.py    # AnalysisContext 上下文对象
+│   │   ├── symbol_processor.py  # 符号处理模块化函数
+│   │   └── exceptions.py # 自定义异常类
 │   ├── connectors/       # 交易所连接器
+│   │   ├── base.py       # 基类
 │   │   ├── binance.py    # Binance API
-│   │   ├── okx.py        # OKX API（交易聚合）
+│   │   ├── okx.py        # OKX API
 │   │   ├── bybit.py      # Bybit API
 │   │   └── coinbase.py   # Coinbase API
 │   ├── analyzers/        # 分析模块
 │   │   ├── taker_flow.py      # 资金流分析
 │   │   ├── multi_platform.py  # 多平台信号
 │   │   ├── early_pump.py      # 1m 主力拉升
-│   │   └── steady_growth.py   # 15m 稳步上涨
+│   │   ├── steady_growth.py   # 15m 稳步上涨
+│   │   ├── panic_dump.py      # 恐慌出货
+│   │   ├── volume_spike.py    # 成交量暴增
+│   │   ├── whale_watcher.py   # 巨鲸监控
+│   │   └── spot_futures_analyzer.py  # 现货合约联动
+│   ├── processors/       # 数据处理
+│   │   └── data_processor.py
+│   ├── strategies/       # 交易策略
+│   │   └── entry_exit.py
+│   ├── services/         # 服务层
+│   │   ├── notification.py    # 通知服务
+│   │   └── realtime_monitor.py # 实时监控
+│   ├── storage/         # 存储层
+│   │   └── persistence.py
 │   ├── utils/            # 工具模块
 │   │   ├── discovery.py  # 币种发现
-│   │   └── logger.py     # 日志配置
+│   │   ├── logger.py     # 日志配置
+│   │   ├── indicators.py # 技术指标
+│   │   ├── market_regime.py # 市场环境
+│   │   ├── position_manager.py # 仓位管理
+│   │   └── dataframe_helpers.py # DataFrame辅助（新增）
 │   ├── models.py         # 数据模型
 │   ├── config.py         # 配置文件
 │   └── main.py           # 主程序
+├── tests/                # 测试（新增）
+│   ├── conftest.py       # Pytest配置
+│   ├── test_analyzers.py
+│   ├── test_dataframe_helpers.py
+│   └── test_processor.py
+├── docs/                 # 文档（新增）
+│   ├── ARCHITECTURE.md   # 架构文档
+│   └── API.md            # API文档
 └── README.md
 ```
+
+详细架构说明请参考 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ---
 

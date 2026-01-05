@@ -1,4 +1,5 @@
 import pandas as pd
+from typing import Dict, Any
 from src.utils.logger import logger
 
 class TakerFlowAnalyzer:
@@ -8,7 +9,7 @@ class TakerFlowAnalyzer:
     def __init__(self, window: int = 50):
         self.window = window
 
-    def analyze(self, df: pd.DataFrame) -> dict:
+    def analyze(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
         Calculates Long-Term Net Flow and interpretation.
         """

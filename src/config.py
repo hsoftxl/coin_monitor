@@ -1,7 +1,14 @@
 """
 配置文件 - 所有配置项都在此文件中直接设置
-如需修改配置，直接编辑本文件即可，无需使用 .env 文件
+如需修改配置，直接编辑本文件即可，或使用环境变量（优先）
+环境变量优先级高于文件中的默认值
 """
+
+import os
+from dotenv import load_dotenv
+
+# 加载 .env 文件（如果存在）
+load_dotenv()
 
 class Config:
     # ==================== 基础配置 ====================
@@ -49,14 +56,23 @@ class Config:
     }
     
     # ==================== 通知配置 ====================
-    # 钉钉通知
-    ENABLE_DINGTALK = True  # 改这里：True启用 / False禁用
-    DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=36a7d64cdeaf611023d1ed25bd5f66f8df242632ae872b6769ce59c74235846b"
-    DINGTALK_SECRET = "SEC10ac09242c4143447d588749090e334ba50e29f30b717c241c41ec86edfc6bfe"
+    # 钉钉通知（主通道）
+    # 优先从环境变量读取，如果没有则使用默认值
+    ENABLE_DINGTALK = os.getenv('ENABLE_DINGTALK', 'True').lower() == 'true'
+    DINGTALK_WEBHOOK = os.getenv('DINGTALK_WEBHOOK', "https://oapi.dingtalk.com/robot/send?access_token=36a7d64cdeaf611023d1ed25bd5f66f8df242632ae872b6769ce59c74235846b")
+    DINGTALK_SECRET = os.getenv('DINGTALK_SECRET', "SEC10ac09242c4143447d588749090e334ba50e29f30b717c241c41ec86edfc6bfe")
     
-    # 企业微信通知
-    ENABLE_WECHAT = False  # 改这里：True启用 / False禁用
-    WECHAT_WEBHOOK = ""  # 填写你的企业微信机器人 Webhook
+    # 企业微信通知（主通道）
+    ENABLE_WECHAT = os.getenv('ENABLE_WECHAT', 'False').lower() == 'true'
+    WECHAT_WEBHOOK = os.getenv('WECHAT_WEBHOOK', "")
+    
+    # 拉盘/稳步上涨专用通知通道（独立通道）
+    ENABLE_PUMP_GROWTH_CHANNEL = os.getenv('ENABLE_PUMP_GROWTH_CHANNEL', 'True').lower() == 'true'
+    # 钉钉专用通道（拉盘/稳步上涨）
+    PUMP_GROWTH_DINGTALK_WEBHOOK = os.getenv('PUMP_GROWTH_DINGTALK_WEBHOOK', "https://oapi.dingtalk.com/robot/send?access_token=2b970a4f041047a653081784a1fc58f826179d4e840839e471f788fc4dece242")
+    PUMP_GROWTH_DINGTALK_SECRET = os.getenv('PUMP_GROWTH_DINGTALK_SECRET', "SECcc4cff6bd3ec64132278fa0ea9346ff09cdf81a2f32fb81b126f39ee954d5030")
+    # 企业微信专用通道（拉盘/稳步上涨）
+    PUMP_GROWTH_WECHAT_WEBHOOK = os.getenv('PUMP_GROWTH_WECHAT_WEBHOOK', "")
     
     # 通知等级阈值（只推送这些等级的信号）
     NOTIFY_GRADES = ["A+", "A"]

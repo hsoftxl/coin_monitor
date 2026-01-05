@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Any
 from src.config import Config
 
 class WhaleWatcher:
@@ -8,7 +8,7 @@ class WhaleWatcher:
     def __init__(self, threshold: float = Config.WHALE_THRESHOLD):
         self.threshold = threshold
 
-    def check_trades(self, trades: List[Dict]) -> List[Dict]:
+    def check_trades(self, trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Filters trades exceeding the threshold.
         """

@@ -2,8 +2,9 @@ import asyncio
 import json
 import aiohttp
 import websockets
+import websockets.exceptions
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from src.config import Config
 from src.utils.logger import logger
 from src.services.notification import NotificationService
@@ -40,6 +41,10 @@ class RealtimeMonitor:
         # Cooldown tracking (separate for spot/futures)
         self.cooldowns = {}
         self.cooldown_sec = 600  # 10 minutes
+        
+        # Connection health tracking
+        self.connection_stats = {}  # {chunk_id: {'last_message_time': float, 'message_count': int, 'reconnect_count': int}}
+        self.health_check_interval = 60  # Check health every 60 seconds
 
     async def get_spot_pairs(self):
         """Fetch all SPOT USDT trading pairs from Binance."""
@@ -83,12 +88,22 @@ class RealtimeMonitor:
             logger.error(f"❌ 获取合约交易对失败: {e}")
 
     async def stats_report(self):
-        """Report statistics every 30 seconds."""
+        """Report statistics every 30 seconds and check connection health."""
         while True:
             await asyncio.sleep(30)
             spot_count = len(self.spot_symbols) if self.enable_spot else 0
             futures_count = len(self.futures_symbols) if self.enable_futures else 0
             logger.info(f"[实时监控] 过去30秒处理 {self.msg_count} 条数据 | 现货:{spot_count} 合约:{futures_count}")
+            
+            # Health check
+            current_time = asyncio.get_event_loop().time()
+            for conn_key, stats in self.connection_stats.items():
+                time_since_last_msg = current_time - stats['last_message_time']
+                if time_since_last_msg > 120:  # No message for 2 minutes
+                    logger.warning(f"[实时监控] {conn_key} 健康检查: 已{int(time_since_last_msg)}秒未收到消息")
+                if stats['reconnect_count'] > 5:
+                    logger.warning(f"[实时监控] {conn_key} 健康检查: 重连次数过多 ({stats['reconnect_count']})")
+            
             self.msg_count = 0
 
     async def start(self):
@@ -118,24 +133,81 @@ class RealtimeMonitor:
         await asyncio.gather(*tasks)
 
     async def _connect_socket(self, url, chunk_id, market_type):
-        """Connect to WebSocket and process messages."""
+        """
+        Connect to WebSocket and process messages with exponential backoff retry.
+        
+        Args:
+            url: WebSocket URL
+            chunk_id: Chunk identifier for logging
+            market_type: 'spot' or 'futures'
+        """
         logger.info(f"[实时监控] 正在连接 {market_type.upper()} 数据流 #{chunk_id}...")
         retry_delay = 5
+        max_retry_delay = 60
+        reconnect_count = 0
+        
+        # Initialize connection stats
+        conn_key = f"{market_type}-{chunk_id}"
+        if conn_key not in self.connection_stats:
+            self.connection_stats[conn_key] = {
+                'last_message_time': 0,
+                'message_count': 0,
+                'reconnect_count': 0,
+                'last_health_check': 0
+            }
         
         while True:
             try:
-                async with websockets.connect(url) as websocket:
+                # Set connection timeout
+                async with websockets.connect(
+                    url,
+                    ping_interval=20,  # Send ping every 20 seconds
+                    ping_timeout=10,  # Wait 10 seconds for pong
+                    close_timeout=10
+                ) as websocket:
                     logger.info(f"[实时监控] {market_type.upper()} #{chunk_id} 连接成功")
+                    reconnect_count = 0
+                    retry_delay = 5  # Reset retry delay on successful connection
+                    
+                    # Update connection stats
+                    self.connection_stats[conn_key]['reconnect_count'] = reconnect_count
+                    self.connection_stats[conn_key]['last_message_time'] = asyncio.get_event_loop().time()
+                    
                     while True:
-                        message = await websocket.recv()
-                        self.msg_count += 1
-                        data = json.loads(message)
-                        if 'data' in data:
-                            await self._process_kline(data['data'], market_type)
-            except Exception as e:
-                logger.error(f"[实时监控] {market_type.upper()} #{chunk_id} 连接异常: {e}，{retry_delay}秒后重连...")
+                        try:
+                            message = await asyncio.wait_for(websocket.recv(), timeout=30)
+                            self.msg_count += 1
+                            data = json.loads(message)
+                            
+                            # Update stats
+                            self.connection_stats[conn_key]['message_count'] += 1
+                            self.connection_stats[conn_key]['last_message_time'] = asyncio.get_event_loop().time()
+                            
+                            if 'data' in data:
+                                await self._process_kline(data['data'], market_type)
+                        except asyncio.TimeoutError:
+                            # No message received in 30 seconds, send ping to check connection
+                            logger.debug(f"[实时监控] {market_type.upper()} #{chunk_id} 30秒未收到消息，检查连接...")
+                            try:
+                                pong_waiter = await websocket.ping()
+                                await asyncio.wait_for(pong_waiter, timeout=10)
+                            except Exception:
+                                logger.warning(f"[实时监控] {market_type.upper()} #{chunk_id} Ping失败，准备重连...")
+                                break
+                                
+            except websockets.exceptions.ConnectionClosed:
+                reconnect_count += 1
+                self.connection_stats[conn_key]['reconnect_count'] = reconnect_count
+                logger.warning(f"[实时监控] {market_type.upper()} #{chunk_id} 连接关闭，{retry_delay}秒后重连 (重连次数: {reconnect_count})...")
                 await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 60)
+                retry_delay = min(retry_delay * 2, max_retry_delay)  # Exponential backoff
+                
+            except Exception as e:
+                reconnect_count += 1
+                self.connection_stats[conn_key]['reconnect_count'] = reconnect_count
+                logger.error(f"[实时监控] {market_type.upper()} #{chunk_id} 连接异常: {e}，{retry_delay}秒后重连 (重连次数: {reconnect_count})...")
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, max_retry_delay)  # Exponential backoff
 
     async def _process_kline(self, data, market_type):
         """Process incoming kline data."""

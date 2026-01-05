@@ -1,5 +1,6 @@
 from typing import Dict, List
 import numpy as np
+import pandas as pd
 import time
 from src.config import Config
 
@@ -37,15 +38,22 @@ class EntryExitStrategy:
         trend_5m = "NEUTRAL"
         trend_1h = "NEUTRAL"
         
+        # Optimized DataFrame access
+        from src.utils.dataframe_helpers import get_latest_value
+        
         if df_5m is not None and not df_5m.empty:
-            close = df_5m['close'].iloc[-1]
-            sma20 = df_5m['close'].rolling(20).mean().iloc[-1]
+            close = get_latest_value(df_5m, 'close', 0.0)
+            sma20_series = df_5m['close'].rolling(20).mean()
+            # Get last value from Series directly (more efficient)
+            sma20 = sma20_series.iloc[-1] if len(sma20_series) > 0 and not pd.isna(sma20_series.iloc[-1]) else 0.0
             if close > sma20: trend_5m = "BULLISH"
             elif close < sma20: trend_5m = "BEARISH"
             
         if df_1h is not None and not df_1h.empty:
-            close = df_1h['close'].iloc[-1]
-            sma20 = df_1h['close'].rolling(20).mean().iloc[-1]
+            close = get_latest_value(df_1h, 'close', 0.0)
+            sma20_series = df_1h['close'].rolling(20).mean()
+            # Get last value from Series directly (more efficient)
+            sma20 = sma20_series.iloc[-1] if len(sma20_series) > 0 and not pd.isna(sma20_series.iloc[-1]) else 0.0
             if close > sma20: trend_1h = "BULLISH"
             elif close < sma20: trend_1h = "BEARISH"
             

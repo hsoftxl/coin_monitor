@@ -48,6 +48,10 @@ htmlcov/
 # Redis dump
 *.rdb
 
+# Environment variables
+.env
+.env.local
 
 tmp/
 data/signals.db
+.trae

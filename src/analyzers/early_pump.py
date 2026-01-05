@@ -124,9 +124,13 @@ class EarlyPumpAnalyzer:
             if now - self.cooldowns[symbol] < self.cooldown_sec:
                 return None
 
-        # Get latest closed candle
-        current = df.iloc[-1]
-        prev = df.iloc[-2]
+        # Get latest closed candle (optimized access)
+        from src.utils.dataframe_helpers import get_latest_values
+        latest_rows = get_latest_values(df, n=2)
+        if latest_rows[0] is None or latest_rows[1] is None:
+            return None
+        current = latest_rows[0]
+        prev = latest_rows[1]
 
         # 1. Price Check: Close > Open significantly
         open_price = current['open']

@@ -30,11 +30,11 @@ class StrategyLearner:
             symbols = self._get_top_volume_symbols(limit=10)
         
         param_grid = {
-            'min_total_flow': [100000, 200000, 300000],
-            'min_ratio': [1.5, 2.0, 2.5],
-            'atr_sl_mult': [1.5, 2.0],
-            'atr_tp_mult': [2.0, 3.0],
-            'min_consensus_bars': [1, 2, 3]
+            'min_total_flow': [10000, 50000, 100000],  # 降低资金流阈值，适应1分钟K线
+            'min_ratio': [1.2, 1.5, 2.0],  # 增加更低的买卖比
+            'atr_sl_mult': [1.0, 1.5, 2.0],  # 增加更多ATR止损倍数
+            'atr_tp_mult': [1.5, 2.0, 2.5],  # 增加更多ATR止盈倍数
+            'min_consensus_bars': [1, 2]  # 减少共识K线数要求
         }
         
         all_results = []
@@ -78,23 +78,57 @@ class StrategyLearner:
             self.connector = None
         
         if all_results:
+            # 按胜率排序所有结果
             all_results.sort(key=lambda x: x['best_results']['winrate'], reverse=True)
-            top_results = all_results[:3]
-            best_global_params = self._calculate_best_params(top_results)
             
-            self.best_strategies['global'] = {
-                'params': best_global_params,
-                'winrate': top_results[0]['best_results']['winrate'],
-                'symbols': [r['symbol'] for r in top_results]
-            }
+            # 筛选出有实际交易的结果
+            valid_results = [r for r in all_results if r['best_results']['total_trades'] > 0]
             
-            logger.info(f"🎉 策略学习完成！全局最优胜率: {self.best_strategies['global']['winrate']:.2%}")
+            if valid_results:
+                # 计算所有有效结果的平均胜率
+                avg_winrate = sum(r['best_results']['winrate'] for r in valid_results) / len(valid_results)
+                
+                # 筛选胜率高于平均水平的结果
+                above_avg_results = [r for r in valid_results if r['best_results']['winrate'] >= avg_winrate]
+                
+                # 使用足够多的结果来计算最优参数
+                num_results_to_use = min(5, len(above_avg_results)) if above_avg_results else min(3, len(valid_results))
+                selected_results = above_avg_results[:num_results_to_use] if above_avg_results else valid_results[:num_results_to_use]
+                
+                best_global_params = self._calculate_best_params(selected_results)
+                best_winrate = selected_results[0]['best_results']['winrate']
+                best_symbols = [r['symbol'] for r in selected_results]
+                
+                self.best_strategies['global'] = {
+                    'params': best_global_params,
+                    'winrate': best_winrate,
+                    'symbols': best_symbols
+                }
+                
+                logger.info(f"🎉 策略学习完成！全局最优胜率: {best_winrate:.2%}")
+                logger.info(f"   共测试 {len(valid_results)} 个有效品种，使用 {num_results_to_use} 个结果计算最优参数")
+                logger.info(f"   平均胜率: {avg_winrate:.2%}")
+            else:
+                logger.warning("⚠️  所有品种回测失败，未找到有效策略")
+                # 使用优化后的默认参数
+                self.best_strategies['global'] = {
+                    'params': {
+                        'min_total_flow': 10000,  # 使用更低的默认值
+                        'min_ratio': 1.2,
+                        'atr_sl_mult': 1.5,
+                        'atr_tp_mult': 2.0,
+                        'min_consensus_bars': 1
+                    },
+                    'winrate': 0.0,
+                    'symbols': []
+                }
         else:
             logger.warning("⚠️  所有品种回测失败，未找到有效策略")
+            # 使用优化后的默认参数
             self.best_strategies['global'] = {
                 'params': {
-                    'min_total_flow': 100000,
-                    'min_ratio': 1.5,
+                    'min_total_flow': 10000,  # 使用更低的默认值
+                    'min_ratio': 1.2,
                     'atr_sl_mult': 1.5,
                     'atr_tp_mult': 2.0,
                     'min_consensus_bars': 1

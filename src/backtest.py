@@ -244,14 +244,16 @@ class Backtester:
         
         consensus = "NEUTRAL"
         flow = metrics['cumulative_net_flow']
-        if flow > Config.STRATEGY_MIN_TOTAL_FLOW: consensus = "看涨"
-        elif flow < -Config.STRATEGY_MIN_TOTAL_FLOW: consensus = "看跌"
+        min_total_flow = self.strategy.min_total_flow  # 使用当前策略的参数
+        
+        if flow > min_total_flow: consensus = "看涨"
+        elif flow < -min_total_flow: consensus = "看跌"
         
         df_5m_slice = self.df_5m[self.df_5m.index <= timestamp]
         df_1h_slice = self.df_1h[self.df_1h.index <= timestamp]
         
         signals = []
-        if abs(flow) > Config.STRATEGY_MIN_TOTAL_FLOW * 2:
+        if abs(flow) > min_total_flow * 2:
             signals.append({'grade': 'A', 'type': 'Strong Flow'})
             
         rec = self.strategy.evaluate(

@@ -15,12 +15,12 @@ from loguru import logger
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.config import Config
-from src.services.strategy_learner import StrategyLearner
-from src.services.symbol_selector import SymbolSelector
-from src.services.notification import NotificationService
-from src.strategies.entry_exit import EntryExitStrategy
-from src.connectors.binance import BinanceConnector
+from config import Config
+from services.strategy_learner import StrategyLearner
+from services.symbol_selector import SymbolSelector
+from services.notification import NotificationService
+from strategies.entry_exit import EntryExitStrategy
+from connectors.binance import BinanceConnector
 
 
 async def send_trading_signal_notification(
@@ -31,8 +31,11 @@ async def send_trading_signal_notification(
 ):
     """发送交易信号通知（使用主通道）"""
     
-    if not symbols:
+    if not isinstance(symbols, list) or not symbols:
         return
+    
+    if not isinstance(strategy_params, dict):
+        strategy_params = {}
     
     # 检查通知服务是否启用
     if not notification_service:
@@ -312,7 +315,6 @@ async def main():
     
     try:
         # 初始化binance连接器，添加重试机制
-        binance = None
         max_retries = 3
         retry_delay = 2  # 秒
         
@@ -340,21 +342,35 @@ async def main():
             all_symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']
         
         # 立即执行第一轮学习
-        success, current_strategy, current_winrate = await run_learning_cycle(1, args, notification_service, binance)
+        cycle_num = 1
+        success, current_strategy, current_winrate = await run_learning_cycle(cycle_num, args, notification_service, binance)
         if success and current_strategy:
             # 学习完成后立即扫描
             last_notified = await scan_and_notify(
                 binance, notification_service, current_strategy, all_symbols, last_notified
             )
-        cycle_num = 1
         
         # 主循环
         last_learn_time = datetime.now()
+        last_symbol_update_time = datetime.now()
+        symbol_update_interval = 3600  # 每小时更新一次品种列表
         
         while True:
             await asyncio.sleep(args.scan_interval)
             
             try:
+                # 检查是否需要更新品种列表
+                time_since_symbol_update = (datetime.now() - last_symbol_update_time).total_seconds()
+                if time_since_symbol_update >= symbol_update_interval:
+                    logger.info("🔄 更新高成交量品种列表...")
+                    new_symbols = await get_top_volume_symbols(binance, args.limit)
+                    if new_symbols:
+                        all_symbols = new_symbols
+                        last_symbol_update_time = datetime.now()
+                        logger.info(f"✅ 更新完成，共 {len(all_symbols)} 个品种")
+                    else:
+                        logger.warning("⚠️  更新品种列表失败，继续使用旧列表")
+                
                 # 检查是否需要重新学习策略
                 time_since_learn = (datetime.now() - last_learn_time).total_seconds()
                 need_relearn = time_since_learn >= args.learn_interval
@@ -367,6 +383,11 @@ async def main():
                     if success:
                         last_learn_time = datetime.now()
                         last_notified = set()  # 重置已通知集合
+                        # 学习完成后立即扫描最新品种
+                        if current_strategy:
+                            last_notified = await scan_and_notify(
+                                binance, notification_service, current_strategy, all_symbols, last_notified
+                            )
                     else:
                         logger.warning("学习失败，继续使用上次策略")
                 

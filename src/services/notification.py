@@ -104,10 +104,12 @@ class NotificationService:
         
         except (aiohttp.ClientError, ValueError, KeyError) as e:
             logger.error(f"❌ 钉钉推送异常: {e}")
-            raise NotificationError(f"Failed to send DingTalk notification: {e}") from e
+            # 只记录日志，不抛出异常，防止主程序崩溃
+            return False
         except Exception as e:
             logger.error(f"❌ 钉钉推送未知异常: {e}")
-            raise NotificationError(f"Unexpected error in DingTalk notification: {e}") from e
+            # 只记录日志，不抛出异常，防止主程序崩溃
+            return False
     
     async def send_wechat(self, message: str, webhook: str = None) -> bool:
         """
@@ -145,13 +147,12 @@ class NotificationService:
         
         except (aiohttp.ClientError, ValueError, KeyError) as e:
             logger.error(f"❌ 企业微信推送异常: {e}")
-            # 动态导入异常类
-            from src.core.exceptions import NotificationError
-            raise NotificationError(f"Failed to send WeChat notification: {e}") from e
+            # 只记录日志，不抛出异常，防止主程序崩溃
+            return False
         except Exception as e:
             logger.error(f"❌ 企业微信推送未知异常: {e}")
-            from src.core.exceptions import NotificationError
-            raise NotificationError(f"Unexpected error in WeChat notification: {e}") from e
+            # 只记录日志，不抛出异常，防止主程序崩溃
+            return False
     
     def format_signal_message(self, signal: Dict, platform_metrics: Dict, symbol: str) -> str:
         """
@@ -304,6 +305,9 @@ class NotificationService:
         emoji = "📈" if side == 'BUY' else "📉"
         
         # 构建消息
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="en")
+        
         message = f"""### 🐳 巨鲸交易警报
 
 **币种**: **{symbol}**
@@ -312,6 +316,7 @@ class NotificationService:
 **金额**: <font color='{"green" if side == "BUY" else "red"}'>**${whale_data['cost']:,.0f}**</font>
 **价格**: ${whale_data['price']:,.4f}
 **时间**: {timestamp}
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -359,12 +364,16 @@ class NotificationService:
             flow_color = "green" if flow > 0 else "red"
             flow_lines.append(f"- {flow_emoji} **{name.upper()}**: <font color='{flow_color}'>{flow_k:+.0f}k USDT</font>")
         
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="en")
+        
         # 构建消息
         message = f"""### {emoji} 市场共识警报
 
 **币种**: **{symbol}**
 **共识**: <font color='{color}'>**{consensus}**</font>
 **触发时间**: {timestamp}
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -413,6 +422,9 @@ class NotificationService:
             lines.append(f"- {name.upper()}: <font color='{color}'>{k:+.0f}k USDT</font>")
         pos_notional = recommendation.get('notional_usd')
         pos_size = recommendation.get('size_base')
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+        
         text = f"""### 🎯 策略建议
 
 **币种**: **{symbol}**
@@ -422,6 +434,7 @@ class NotificationService:
 **止盈**: {('未设置' if tp is None else f'${tp:.4f}')}
 **理由**: {reason}
 {"**建议仓位**: " + (f"{pos_size:.4f} 份基币 (~${pos_notional:,.0f})" if (pos_notional and pos_size) else "待风险参数计算") }
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -448,6 +461,9 @@ class NotificationService:
         
         emoji = "🔥" if ratio > 5 else "⚡️"
         
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+        
         message = f"""### {emoji} 成交量暴增警报
         
 **币种**: **{symbol}**
@@ -456,6 +472,7 @@ class NotificationService:
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
 {self._format_24h_vol(spike_data.get('vol_24h', 0))}
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -484,6 +501,9 @@ class NotificationService:
         buy_ratio = data['buy_ratio'] * 100
         price = data['price']
         
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+        
         message = f"""### 🚀 主力拉盘启动警报
         
 **币种**: **{symbol}**
@@ -493,6 +513,7 @@ class NotificationService:
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
 {self._format_24h_vol(data.get('vol_24h', 0))}
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -541,6 +562,9 @@ class NotificationService:
         sell_ratio = data['sell_ratio'] * 100
         price = data['price']
         
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+        
         message = f"""### 📉 主力暴力出货警报
         
 **币种**: **{symbol}**
@@ -549,6 +573,7 @@ class NotificationService:
 **主动卖出**: <font color='green'>**{sell_ratio:.0f}%**</font> (恐慌抛售)
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -595,6 +620,9 @@ class NotificationService:
         # 添加策略学习标记
         strategy_tag = "【策略学习】" if is_strategy_learned else ""
         
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+        
         message = f"""### 🚀 {strategy_tag}实时拉盘警报 {status_emoji}
         
 **币种**: **{symbol}** [{market_label}]
@@ -603,6 +631,7 @@ class NotificationService:
 **成交额**: <font color='red'>**${vol:,.0f}**</font> USDT
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -648,6 +677,9 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
         # 添加策略学习标记
         strategy_tag = "【策略学习】" if is_strategy_learned else ""
         
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+        
         message = f"""### 💎 {strategy_tag}稳步上涨趋势确认
         
 **币种**: **{symbol}**
@@ -655,6 +687,7 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 **当前价格**: ${price:,.4f}
 **触发时间**: {timestamp}
 {self._format_24h_vol(data.get('vol_24h', 0))}
+**币安地址**: [{symbol}]({binance_url})
 
 ---
 
@@ -690,6 +723,33 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
             if self.enable_wechat:
                 await self.send_wechat(message)
 
+    def _get_binance_url(self, symbol: str, market_type: str = None, lang: str = "en") -> str:
+        """
+        根据市场类型和语言生成正确的Binance URL
+        
+        Args:
+            symbol: 交易对符号 (如 "BTC/USDT" 或 "BTC/USDT:USDT")
+            market_type: 市场类型: 'spot' (现货) 或 'future' (合约)，默认使用配置值
+            lang: 语言: 'en' (英文) 或 'zh-CN' (中文)
+        
+        Returns:
+            正确的Binance交易对URL
+        """
+        if market_type is None:
+            market_type = Config.MARKET_TYPE
+        
+        # 处理符号格式：移除斜杠和冒号
+        cleaned_symbol = symbol.split(':')[0]  # 移除 :USDT 后缀
+        binance_symbol = cleaned_symbol.replace('/', '')  # 移除斜杠
+        
+        if market_type == "future":
+            # 合约URL格式：https://www.binance.com/en/futures/ICPUSDT
+            return f"https://www.binance.com/{lang}/futures/{binance_symbol}"
+        else:
+            # 现货URL格式：https://www.binance.com/zh-CN/trade/ICP_USDT
+            binance_symbol_for_spot = cleaned_symbol.replace('/', '_')
+            return f"https://www.binance.com/{lang}/trade/{binance_symbol_for_spot}"
+    
     def _format_24h_vol(self, vol_24h: float) -> str:
         if not vol_24h:
             return ""

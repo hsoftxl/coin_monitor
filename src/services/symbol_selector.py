@@ -30,50 +30,82 @@ class SymbolSelector:
         logger.info(f"开始筛选可交易品种，共 {len(symbols)} 个...")
         selected = []
         
-        # 初始化连接器
-        connector = BinanceConnector()
-        await connector.initialize()
+        # 初始化连接器，添加重试机制
+        connector = None
+        max_retries = 3
+        retry_delay = 2  # 秒
         
-        for symbol in symbols:
+        for attempt in range(max_retries):
             try:
-                # 修复符号格式，移除冒号并转换为正确格式
-                cleaned_symbol = symbol.split(':')[0]  # 移除 :USDT 后缀
-                
-                # 获取最新数据（50根1分钟K线）
-                candles = await connector.fetch_standard_candles(cleaned_symbol, limit=50)
-                if not candles or len(candles) < 50:
-                    logger.debug(f"  {cleaned_symbol}: 数据不足，跳过")
-                    continue
-                
-                # 处理数据
-                df = DataProcessor.process_candles(candles)
-                
-                # 计算指标（模拟现有策略的指标计算）
-                metrics = self._calculate_metrics(df)
-                
-                # 评估策略
-                platform_metrics = {'binance': metrics}
-                consensus = "看涨" if metrics['cumulative_net_flow'] > Config.STRATEGY_MIN_TOTAL_FLOW else "看跌"
-                signals = []
-                
-                # 使用最优策略评估
-                result = self.strategy.evaluate(
-                    platform_metrics, 
-                    consensus, 
-                    signals, 
-                    cleaned_symbol
-                )
-                
-                # 如果策略建议入场，添加到选中列表
-                if result['action'] == 'ENTRY':
-                    selected.append(cleaned_symbol)
-                    logger.info(f"  ✅ {cleaned_symbol}: 符合交易条件")
-                else:
-                    logger.debug(f"  ❌ {cleaned_symbol}: 不符合交易条件")
+                connector = BinanceConnector()
+                await connector.initialize()
+                logger.info("✅ 成功初始化Binance连接器")
+                break
             except Exception as e:
-                logger.error(f"  ⚠️  筛选 {symbol} 失败: {e}")
+                logger.error(f"❌ 第 {attempt+1}/{max_retries} 次初始化连接器失败: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"⏱️  {retry_delay}秒后重试...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    logger.error("❌ 连接器初始化失败，跳过筛选")
+                    return selected
         
-        await connector.close()
+        try:
+            # 修复符号格式，移除冒号并转换为正确格式
+            cleaned_symbols = [symbol.split(':')[0] for symbol in symbols]  # 移除 :USDT 后缀
+            
+            # 批量获取数据，添加请求间隔控制
+            for i, cleaned_symbol in enumerate(cleaned_symbols):
+                try:
+                    logger.debug(f"  获取 {cleaned_symbol} 数据...")
+                    
+                    # 获取最新数据（50根1分钟K线）
+                    candles = await connector.fetch_standard_candles(cleaned_symbol, limit=50)
+                    if not candles or len(candles) < 50:
+                        logger.debug(f"  {cleaned_symbol}: 数据不足，跳过")
+                        continue
+                    
+                    # 处理数据
+                    df = DataProcessor.process_candles(candles)
+                    
+                    # 计算指标（模拟现有策略的指标计算）
+                    metrics = self._calculate_metrics(df)
+                    
+                    # 评估策略
+                    platform_metrics = {'binance': metrics}
+                    consensus = "看涨" if metrics['cumulative_net_flow'] > Config.STRATEGY_MIN_TOTAL_FLOW else "看跌"
+                    signals = []
+                    
+                    # 使用最优策略评估
+                    result = self.strategy.evaluate(
+                        platform_metrics, 
+                        consensus, 
+                        signals, 
+                        cleaned_symbol
+                    )
+                    
+                    # 如果策略建议入场，添加到选中列表
+                    if result['action'] == 'ENTRY':
+                        selected.append(cleaned_symbol)
+                        logger.info(f"  ✅ {cleaned_symbol}: 符合交易条件")
+                    else:
+                        logger.debug(f"  ❌ {cleaned_symbol}: 不符合交易条件")
+                except Exception as e:
+                    logger.error(f"  ⚠️  筛选 {cleaned_symbol} 失败: {e}")
+                
+                # 添加请求间隔控制，避免短时间内发送过多请求
+                # 最后一个符号不需要等待
+                if i < len(cleaned_symbols) - 1:
+                    await asyncio.sleep(Config.RATE_LIMIT_DELAY * 2)  # 增加间隔，降低请求频率
+        finally:
+            if connector:
+                try:
+                    await connector.close()
+                    logger.info("✅ 已关闭连接器")
+                except Exception as e:
+                    logger.error(f"❌ 关闭连接器失败: {e}")
+        
         logger.info(f"品种筛选完成！共选中 {len(selected)} 个品种")
         return selected
     

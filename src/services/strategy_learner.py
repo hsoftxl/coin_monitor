@@ -69,6 +69,9 @@ class StrategyLearner:
                     logger.warning(f"  ⚠️  {cleaned_symbol}: 无效符号")
                 else:
                     logger.error(f"  ❌ {cleaned_symbol}: {e}")
+            
+            # 添加请求间隔控制，避免短时间内发送过多请求
+            await asyncio.sleep(Config.RATE_LIMIT_DELAY)
         
         if self.connector:
             await self.connector.close()

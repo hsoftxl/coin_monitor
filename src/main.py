@@ -299,14 +299,15 @@ async def main():
                 market_regime=market_regime
             )
             
-            # Process symbols in chunks of 5 to control concurrency
-            for i in range(0, len(target_symbols), 5):
-                chunk = target_symbols[i:i+5]
+            # Process symbols in smaller chunks to reduce API load
+            chunk_size = 2  # 进一步减少每次处理的符号数量
+            for i in range(0, len(target_symbols), chunk_size):
+                chunk = target_symbols[i:i+chunk_size]
                 tasks = [process_symbol(sym, ctx) for sym in chunk]
                 await asyncio.gather(*tasks)
 
-                # Small sleep between chunks to be nice to APIs
-                await asyncio.sleep(1)
+                # Increased sleep between chunks to reduce API requests
+                await asyncio.sleep(Config.RATE_LIMIT_DELAY * 2)
 
             elapsed = time.time() - cycle_start
             logger.info(f"=== 扫描完成，耗时 {elapsed:.1f}s ===")

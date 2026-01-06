@@ -105,7 +105,8 @@ class Backtester:
                 current_start = last_close_time + 1
                 
                 print(f"   Fetched {len(klines)} candles...", end='\r')
-                await asyncio.sleep(0.05)
+                # 增加请求间隔，避免触发API限流
+                await asyncio.sleep(Config.RATE_LIMIT_DELAY)
                 
                 if len(klines) < limit:
                     break
@@ -317,9 +318,18 @@ class Backtester:
         for values in param_grid.values():
             total_combinations *= len(values)
         
+        # 限制参数组合数
+        max_combinations = Config.STRATEGY_LEARNING_MAX_PARAM_COMBINATIONS
+        if total_combinations > max_combinations:
+            logger.info(f"⚠️  参数组合数 {total_combinations} 超过限制，将只测试前 {max_combinations} 个组合")
+        
         current_combo = 0
         
-        for params in itertools.product(*param_grid.values()):
+        # 生成所有参数组合并限制数量
+        all_combinations = list(itertools.product(*param_grid.values()))[:max_combinations]
+        total_to_test = len(all_combinations)
+        
+        for params in all_combinations:
             param_dict = dict(zip(param_grid.keys(), params))
             current_combo += 1
             

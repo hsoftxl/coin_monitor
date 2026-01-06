@@ -47,6 +47,13 @@ async def send_trading_signal_notification(
 - 止损倍数: {strategy_params.get('atr_sl_mult', 1.5):.1f}
 - 止盈倍数: {strategy_params.get('atr_tp_mult', 2.0):.1f}"""
 
+    # 生成币种的币安地址列表（根据市场类型）
+    symbols_with_url = []
+    for sym in symbols:
+        binance_url = notification_service._get_binance_url(sym, lang="en")
+        symbols_with_url.append(f"- **[{sym}]({binance_url})**")
+    symbols_text = "\n".join(symbols_with_url)
+    
     message = f"""### 🚀 【实盘交易信号】{reason}
 
 **通知时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -133,21 +140,35 @@ async def send_strategy_learning_notification(
 
 async def get_top_volume_symbols(binance, limit: int = 100) -> list:
     """获取高成交量品种列表"""
-    tickers = await binance.exchange.fetch_tickers()
+    max_retries = 3
+    retry_delay = 2  # 秒
     
-    usdt_tickers = {}
-    for s, t in tickers.items():
-        if '/USDT' in s:
-            qv = t.get('quoteVolume')
-            if qv is None:
-                base_vol = t.get('baseVolume')
-                last = t.get('last') or 0
-                qv = (base_vol or 0) * last
-            if qv and qv >= Config.MIN_24H_QUOTE_VOLUME:
-                usdt_tickers[s] = qv
-    
-    sorted_symbols = sorted(usdt_tickers.items(), key=lambda x: x[1], reverse=True)
-    return [s[0] for s in sorted_symbols[:limit]]
+    for attempt in range(max_retries):
+        try:
+            tickers = await binance.exchange.fetch_tickers()
+            
+            usdt_tickers = {}
+            for s, t in tickers.items():
+                if '/USDT' in s:
+                    qv = t.get('quoteVolume')
+                    if qv is None:
+                        base_vol = t.get('baseVolume')
+                        last = t.get('last') or 0
+                        qv = (base_vol or 0) * last
+                    if qv and qv >= Config.MIN_24H_QUOTE_VOLUME:
+                        usdt_tickers[s] = qv
+            
+            sorted_symbols = sorted(usdt_tickers.items(), key=lambda x: x[1], reverse=True)
+            return [s[0] for s in sorted_symbols[:limit]]
+        except Exception as e:
+            logger.error(f"❌ 第 {attempt+1}/{max_retries} 次获取高成交量品种失败: {e}")
+            if attempt < max_retries - 1:
+                logger.info(f"⏱️  {retry_delay}秒后重试...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # 指数退避
+            else:
+                logger.error("❌ 获取高成交量品种失败，返回空列表")
+                return []
 
 
 async def scan_and_notify(
@@ -162,28 +183,35 @@ async def scan_and_notify(
     if not strategy:
         return last_notified
     
-    selector = SymbolSelector(strategy)
-    selected_symbols = await selector.select_symbols(all_symbols)
-    
-    # 找出新增的品种
-    new_symbols = [s for s in selected_symbols if s not in last_notified]
-    
-    if new_symbols:
-        logger.info(f"🎯 发现 {len(new_symbols)} 个新品种符合条件")
-        await send_trading_signal_notification(
-            notification_service,
-            new_symbols,
-            {
-                'min_total_flow': strategy.min_total_flow,
-                'min_ratio': strategy.min_ratio,
-                'atr_sl_mult': strategy.atr_sl_mult,
-                'atr_tp_mult': strategy.atr_tp_mult
-            },
-            "实时监测到新机会"
-        )
-    
-    # 更新已通知的品种集合
-    return set(selected_symbols)
+    try:
+        selector = SymbolSelector(strategy)
+        selected_symbols = await selector.select_symbols(all_symbols)
+        
+        # 找出新增的品种
+        new_symbols = [s for s in selected_symbols if s not in last_notified]
+        
+        if new_symbols:
+            logger.info(f"🎯 发现 {len(new_symbols)} 个新品种符合条件")
+            await send_trading_signal_notification(
+                notification_service,
+                new_symbols,
+                {
+                    'min_total_flow': strategy.min_total_flow,
+                    'min_ratio': strategy.min_ratio,
+                    'atr_sl_mult': strategy.atr_sl_mult,
+                    'atr_tp_mult': strategy.atr_tp_mult
+                },
+                "实时监测到新机会"
+            )
+        
+        # 更新已通知的品种集合
+        return set(selected_symbols)
+    except Exception as e:
+        logger.error(f"❌ 扫描品种失败: {e}")
+        import traceback
+        traceback.print_exc()
+        # 返回原有的已通知集合，避免丢失状态
+        return last_notified
 
 
 async def run_learning_cycle(cycle_num: int, args, notification_service, binance) -> tuple:
@@ -195,6 +223,9 @@ async def run_learning_cycle(cycle_num: int, args, notification_service, binance
     try:
         # 1. 获取高成交量品种
         top_symbols = await get_top_volume_symbols(binance, args.limit)
+        if not top_symbols:
+            logger.warning("⚠️  未获取到高成交量品种，跳过本轮学习")
+            return False, None, 0.0
         
         # 2. 策略学习
         logger.info("🔍 开始策略学习...")
@@ -223,8 +254,6 @@ async def run_learning_cycle(cycle_num: int, args, notification_service, binance
                     'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'cycle': cycle_num
                 }, f, indent=2, ensure_ascii=False)
-            
-
             
             return True, best_strategy, winrate
         else:
@@ -282,12 +311,33 @@ async def main():
     all_symbols = []
     
     try:
-        binance = BinanceConnector()
-        await binance.initialize()
-        await binance.exchange.load_markets()
+        # 初始化binance连接器，添加重试机制
+        binance = None
+        max_retries = 3
+        retry_delay = 2  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                binance = BinanceConnector()
+                await binance.initialize()
+                await binance.exchange.load_markets()
+                logger.info("✅ 成功初始化Binance连接器")
+                break
+            except Exception as e:
+                logger.error(f"❌ 第 {attempt+1}/{max_retries} 次初始化Binance连接器失败: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"⏱️  {retry_delay}秒后重试...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    logger.error("❌ Binance连接器初始化失败，程序退出")
+                    return
         
         # 初始获取品种列表
         all_symbols = await get_top_volume_symbols(binance, args.limit)
+        if not all_symbols:
+            logger.warning("⚠️  未获取到品种列表，使用默认品种")
+            all_symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']
         
         # 立即执行第一轮学习
         success, current_strategy, current_winrate = await run_learning_cycle(1, args, notification_service, binance)
@@ -304,26 +354,33 @@ async def main():
         while True:
             await asyncio.sleep(args.scan_interval)
             
-            # 检查是否需要重新学习策略
-            time_since_learn = (datetime.now() - last_learn_time).total_seconds()
-            need_relearn = time_since_learn >= args.learn_interval
-            
-            if need_relearn:
-                cycle_num += 1
-                success, current_strategy, current_winrate = await run_learning_cycle(
-                    cycle_num, args, notification_service, binance
-                )
-                if success:
-                    last_learn_time = datetime.now()
-                    last_notified = set()  # 重置已通知集合
-                else:
-                    logger.warning("学习失败，继续使用上次策略")
-            
-            # 持续扫描品种
-            if current_strategy:
-                last_notified = await scan_and_notify(
-                    binance, notification_service, current_strategy, all_symbols, last_notified
-                )
+            try:
+                # 检查是否需要重新学习策略
+                time_since_learn = (datetime.now() - last_learn_time).total_seconds()
+                need_relearn = time_since_learn >= args.learn_interval
+                
+                if need_relearn:
+                    cycle_num += 1
+                    success, current_strategy, current_winrate = await run_learning_cycle(
+                        cycle_num, args, notification_service, binance
+                    )
+                    if success:
+                        last_learn_time = datetime.now()
+                        last_notified = set()  # 重置已通知集合
+                    else:
+                        logger.warning("学习失败，继续使用上次策略")
+                
+                # 持续扫描品种
+                if current_strategy:
+                    last_notified = await scan_and_notify(
+                        binance, notification_service, current_strategy, all_symbols, last_notified
+                    )
+            except Exception as e:
+                logger.error(f"❌ 主循环执行失败: {e}")
+                import traceback
+                traceback.print_exc()
+                # 继续循环，不退出程序
+                logger.info("🔄 继续主循环")
     
     except KeyboardInterrupt:
         logger.info("\n⏹️  用户中断程序，正在停止...")

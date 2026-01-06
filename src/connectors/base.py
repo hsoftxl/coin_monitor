@@ -102,19 +102,35 @@ class ExchangeConnector(ABC):
         Executes a function with exponential backoff retry logic.
         """
         retries = 3
-        delay = 1
+        initial_delay = 2  # 增加初始延迟
+        max_delay = 10     # 最大延迟
+        jitter = 0.5       # 随机抖动范围
+        
         for attempt in range(retries):
             try:
                 return await func(*args, **kwargs)
             except (ccxt.NetworkError, ccxt.ExchangeError) as e:
-                logger.warning(f"[{self.exchange_id}] Request failed (Attempt {attempt+1}/{retries}): {e}")
+                # 特别处理429 Too Many Requests错误
+                if "429" in str(e) or "Too Many Requests" in str(e):
+                    logger.warning(f"[{self.exchange_id}] API限流 (429)，正在重试... (Attempt {attempt+1}/{retries})")
+                    # 针对限流错误使用更长的延迟
+                    base_delay = initial_delay * (2 ** attempt)
+                    # 添加随机抖动，避免请求风暴
+                    import random
+                    delay = min(base_delay + random.uniform(-jitter, jitter), max_delay)
+                    await asyncio.sleep(delay)
+                else:
+                    logger.warning(f"[{self.exchange_id}] Request failed (Attempt {attempt+1}/{retries}): {e}")
+                    # 其他网络错误使用标准指数退避
+                    base_delay = initial_delay * (2 ** attempt)
+                    delay = min(base_delay, max_delay)
+                    await asyncio.sleep(delay)
+                    
                 if attempt == retries - 1:
                     logger.error(f"[{self.exchange_id}] All retry attempts failed.")
                     # 使用延迟导入的异常类
                     _, DataFetchError = _get_exceptions()
                     raise DataFetchError(f"Failed to fetch data from {self.exchange_id} after {retries} attempts: {e}") from e
-                await asyncio.sleep(delay)
-                delay *= 2
             except Exception as e:
                 logger.error(f"[{self.exchange_id}] Unexpected error: {e}")
                 # 使用延迟导入的异常类

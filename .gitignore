@@ -57,3 +57,4 @@ data/signals.db
 .trae
 strategy_results.json
 strategy_results_test.json
+test_strategy_results.json

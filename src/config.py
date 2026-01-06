@@ -38,6 +38,10 @@ class Config:
     # API 请求延迟
     RATE_LIMIT_DELAY = 1.0  # 秒
     
+    # 策略学习配置
+    STRATEGY_LEARNING_MAX_CONCURRENT = 1  # 最大并发回测数量（顺序执行，0表示无限）
+    STRATEGY_LEARNING_MAX_PARAM_COMBINATIONS = 20  # 每品种最大参数组合数
+    
     # 24小时成交额过滤（只监控成交额大于此值的币种）
     MIN_24H_QUOTE_VOLUME = 10000000  # 10M USDT
     

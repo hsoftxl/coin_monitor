@@ -57,11 +57,18 @@ async def fetch_symbol_data(
         return {'valid_connectors': {}}
     
     # 1. Fetch 1m Candles (main data)
-    tasks = {
-        name: conn.fetch_standard_candles(symbol=symbol, limit=Config.LIMIT_KLINE) 
-        for name, conn in valid_connectors.items()
-    }
-    results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+    # 为避免API限流，使用顺序获取而不是并行获取
+    results = []
+    for name, conn in valid_connectors.items():
+        try:
+            candles = await conn.fetch_standard_candles(symbol=symbol, limit=Config.LIMIT_KLINE)
+            results.append(candles)
+        except Exception as e:
+            results.append(e)
+        
+        # 添加请求间隔控制，避免短时间内发送过多请求
+        if name != list(valid_connectors.keys())[-1]:
+            await asyncio.sleep(Config.RATE_LIMIT_DELAY)
     
     # Fetch 24h Ticker (for Volume display)
     ticker_24h_vol = 0

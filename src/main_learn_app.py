@@ -118,25 +118,12 @@ async def send_strategy_learning_notification(
     
     logger.info("📢 发送策略学习通知...")
     
-    # 策略学习通知使用独立通道（如果启用）
-    if notification_service.enable_pump_growth_channel:
-        # 使用独立通道发送
-        if notification_service.enable_dingtalk and notification_service.pump_growth_dingtalk_webhook:
-            await notification_service.send_dingtalk(
-                message, 
-                at_all=False, 
-                webhook=notification_service.pump_growth_dingtalk_webhook,
-                secret=notification_service.pump_growth_dingtalk_secret
-            )
-        if notification_service.enable_wechat and notification_service.pump_growth_wechat_webhook:
-            await notification_service.send_wechat(
-                message, 
-                webhook=notification_service.pump_growth_wechat_webhook
-            )
-        logger.info("✅ 策略学习通知已通过独立通道发送")
-    else:
-        # 如果没有独立通道，不发送通知
-        logger.warning("⚠️  未启用独立通道，策略学习通知将不会发送")
+    # 策略学习通知使用主通道发送
+    if notification_service.enable_dingtalk:
+        await notification_service.send_dingtalk(message, at_all=False)
+    if notification_service.enable_wechat:
+        await notification_service.send_wechat(message)
+    logger.info("✅ 策略学习通知已通过主通道发送")
     
     logger.info("✅ 策略学习通知处理完成")
 
@@ -297,7 +284,8 @@ async def main():
     logger.info(f"🔄 学习间隔: {learn_interval_text}")
     logger.info(f"🔍 扫描间隔: {scan_interval_text}")
     logger.info(f"🔔 通知: {'是' if args.notify else '否'}")
-    logger.info(f"📁 独立通道: {'启用' if Config.ENABLE_PUMP_GROWTH_CHANNEL else '未启用'}")
+    logger.info(f"📁 拉盘通道: {'启用' if Config.ENABLE_PUMP_CHANNEL else '未启用'}")
+    logger.info(f"📁 稳步上涨通道: {'启用' if Config.ENABLE_GROWTH_CHANNEL else '未启用'}")
     
     notification_service = None
     if args.notify and (Config.ENABLE_DINGTALK or Config.ENABLE_WECHAT):

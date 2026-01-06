@@ -162,9 +162,12 @@ class RealtimeMonitor:
                 # Set connection timeout
                 async with websockets.connect(
                     url,
-                    ping_interval=20,  # Send ping every 20 seconds
-                    ping_timeout=10,  # Wait 10 seconds for pong
-                    close_timeout=10
+                    ping_interval=30,  # 延长Ping间隔到30秒
+                    ping_timeout=15,    # 延长Ping超时到15秒
+                    close_timeout=15,   # 延长关闭超时到15秒
+                    max_size=2**20,     # 增加最大消息大小到1MB
+                    read_limit=2**20,   # 增加读取限制
+                    write_limit=2**20   # 增加写入限制
                 ) as websocket:
                     logger.info(f"[实时监控] {market_type.upper()} #{chunk_id} 连接成功")
                     reconnect_count = 0
@@ -176,39 +179,66 @@ class RealtimeMonitor:
                     
                     while True:
                         try:
-                            message = await asyncio.wait_for(websocket.recv(), timeout=30)
+                            message = await asyncio.wait_for(websocket.recv(), timeout=45)  # 延长消息接收超时到45秒
                             self.msg_count += 1
-                            data = json.loads(message)
                             
                             # Update stats
                             self.connection_stats[conn_key]['message_count'] += 1
                             self.connection_stats[conn_key]['last_message_time'] = asyncio.get_event_loop().time()
                             
-                            if 'data' in data:
-                                await self._process_kline(data['data'], market_type)
+                            # 安全处理JSON数据
+                            try:
+                                data = json.loads(message)
+                                if 'data' in data:
+                                    await self._process_kline(data['data'], market_type)
+                            except json.JSONDecodeError:
+                                logger.debug(f"[实时监控] {market_type.upper()} #{chunk_id} 收到无效JSON数据，跳过处理")
+                                continue
+                                
                         except asyncio.TimeoutError:
-                            # No message received in 30 seconds, send ping to check connection
-                            logger.debug(f"[实时监控] {market_type.upper()} #{chunk_id} 30秒未收到消息，检查连接...")
+                            # No message received in 45 seconds, send ping to check connection
+                            logger.debug(f"[实时监控] {market_type.upper()} #{chunk_id} 45秒未收到消息，检查连接...")
                             try:
                                 pong_waiter = await websocket.ping()
-                                await asyncio.wait_for(pong_waiter, timeout=10)
-                            except Exception:
-                                logger.warning(f"[实时监控] {market_type.upper()} #{chunk_id} Ping失败，准备重连...")
+                                await asyncio.wait_for(pong_waiter, timeout=15)  # 延长Pong等待时间到15秒
+                                # Ping成功，更新时间戳
+                                self.connection_stats[conn_key]['last_message_time'] = asyncio.get_event_loop().time()
+                            except Exception as ping_e:
+                                logger.warning(f"[实时监控] {market_type.upper()} #{chunk_id} Ping失败: {ping_e}，准备重连...")
                                 break
-                                
-            except websockets.exceptions.ConnectionClosed:
+                        except websockets.exceptions.ConnectionClosedOK:
+                            logger.info(f"[实时监控] {market_type.upper()} #{chunk_id} 正常关闭，准备重连...")
+                            break
+                        except websockets.exceptions.ConnectionClosedError:
+                            logger.warning(f"[实时监控] {market_type.upper()} #{chunk_id} 连接异常关闭，准备重连...")
+                            break
+            except websockets.exceptions.ConnectionClosed as e:
                 reconnect_count += 1
                 self.connection_stats[conn_key]['reconnect_count'] = reconnect_count
                 logger.warning(f"[实时监控] {market_type.upper()} #{chunk_id} 连接关闭，{retry_delay}秒后重连 (重连次数: {reconnect_count})...")
                 await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, max_retry_delay)  # Exponential backoff
+                retry_delay = min(retry_delay * 1.5, max_retry_delay)  # 放缓重连增长速度
+                
+            except websockets.exceptions.InvalidStatusCode as e:
+                reconnect_count += 1
+                self.connection_stats[conn_key]['reconnect_count'] = reconnect_count
+                logger.error(f"[实时监控] {market_type.upper()} #{chunk_id} 连接状态码错误: {e.status_code}，{retry_delay * 2}秒后重连 (重连次数: {reconnect_count})...")
+                await asyncio.sleep(retry_delay * 2)  # 状态码错误使用更长延迟
+                retry_delay = min(retry_delay * 2, max_retry_delay)
+                
+            except (asyncio.TimeoutError, TimeoutError) as e:
+                reconnect_count += 1
+                self.connection_stats[conn_key]['reconnect_count'] = reconnect_count
+                logger.error(f"[实时监控] {market_type.upper()} #{chunk_id} 连接超时: {e}，{retry_delay * 1.5}秒后重连 (重连次数: {reconnect_count})...")
+                await asyncio.sleep(retry_delay * 1.5)  # 超时错误使用更长延迟
+                retry_delay = min(retry_delay * 1.5, max_retry_delay)
                 
             except Exception as e:
                 reconnect_count += 1
                 self.connection_stats[conn_key]['reconnect_count'] = reconnect_count
                 logger.error(f"[实时监控] {market_type.upper()} #{chunk_id} 连接异常: {e}，{retry_delay}秒后重连 (重连次数: {reconnect_count})...")
                 await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, max_retry_delay)  # Exponential backoff
+                retry_delay = min(retry_delay * 1.5, max_retry_delay)  # 放缓重连增长速度
 
     async def _process_kline(self, data, market_type):
         """Process incoming kline data."""

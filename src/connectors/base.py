@@ -103,27 +103,33 @@ class ExchangeConnector(ABC):
         """
         retries = 3
         initial_delay = 2  # 增加初始延迟
-        max_delay = 10     # 最大延迟
+        max_delay = 15     # 增加最大延迟到15秒
         jitter = 0.5       # 随机抖动范围
         
         for attempt in range(retries):
             try:
                 return await func(*args, **kwargs)
-            except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            except (ccxt.NetworkError, ccxt.ExchangeError, asyncio.TimeoutError, TimeoutError) as e:
                 # 特别处理429 Too Many Requests错误
                 if "429" in str(e) or "Too Many Requests" in str(e):
                     logger.warning(f"[{self.exchange_id}] API限流 (429)，正在重试... (Attempt {attempt+1}/{retries})")
                     # 针对限流错误使用更长的延迟
-                    base_delay = initial_delay * (2 ** attempt)
+                    base_delay = initial_delay * (2 ** attempt) * 1.5
                     # 添加随机抖动，避免请求风暴
                     import random
+                    delay = min(base_delay + random.uniform(-jitter, jitter), max_delay)
+                    await asyncio.sleep(delay)
+                elif isinstance(e, (asyncio.TimeoutError, TimeoutError)):
+                    logger.warning(f"[{self.exchange_id}] 请求超时 (Attempt {attempt+1}/{retries}): {e}")
+                    # 超时错误使用更长的延迟
+                    base_delay = initial_delay * (2 ** attempt) * 1.2
                     delay = min(base_delay + random.uniform(-jitter, jitter), max_delay)
                     await asyncio.sleep(delay)
                 else:
                     logger.warning(f"[{self.exchange_id}] Request failed (Attempt {attempt+1}/{retries}): {e}")
                     # 其他网络错误使用标准指数退避
                     base_delay = initial_delay * (2 ** attempt)
-                    delay = min(base_delay, max_delay)
+                    delay = min(base_delay + random.uniform(-jitter, jitter), max_delay)
                     await asyncio.sleep(delay)
                     
                 if attempt == retries - 1:

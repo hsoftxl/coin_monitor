@@ -30,11 +30,17 @@ class NotificationService:
         self.enable_wechat = Config.ENABLE_WECHAT
         self.notify_grades = Config.NOTIFY_GRADES
         
-        # 拉盘/稳步上涨专用通道配置
-        self.enable_pump_growth_channel = Config.ENABLE_PUMP_GROWTH_CHANNEL
-        self.pump_growth_dingtalk_webhook = Config.PUMP_GROWTH_DINGTALK_WEBHOOK
-        self.pump_growth_dingtalk_secret = Config.PUMP_GROWTH_DINGTALK_SECRET
-        self.pump_growth_wechat_webhook = Config.PUMP_GROWTH_WECHAT_WEBHOOK
+        # 拉盘专用通道配置
+        self.enable_pump_channel = Config.ENABLE_PUMP_CHANNEL
+        self.pump_dingtalk_webhook = Config.PUMP_DINGTALK_WEBHOOK
+        self.pump_dingtalk_secret = Config.PUMP_DINGTALK_SECRET
+        self.pump_wechat_webhook = Config.PUMP_WECHAT_WEBHOOK
+        
+        # 稳步上涨专用通道配置
+        self.enable_growth_channel = Config.ENABLE_GROWTH_CHANNEL
+        self.growth_dingtalk_webhook = Config.GROWTH_DINGTALK_WEBHOOK
+        self.growth_dingtalk_secret = Config.GROWTH_DINGTALK_SECRET
+        self.growth_wechat_webhook = Config.GROWTH_WECHAT_WEBHOOK
         
         # 消息队列（用于 B 级信号汇总）
         self.pending_b_signals = []
@@ -493,7 +499,7 @@ class NotificationService:
     async def send_early_pump_alert(self, data: Dict, symbol: str):
         """
         发送主力拉盘初期警报 (A+级)
-        优先发送到专用通道，如果没有配置专用通道则发送到主通道
+        优先发送到拉盘专用通道，如果没有配置专用通道则发送到主通道
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pct = data['pct_change']
@@ -519,8 +525,7 @@ class NotificationService:
 
 **分析**:
 监控到主力资金在**第1分钟**极速抢筹，价格快速脱离成本区，建议关注！
-{f'''
-**策略建议**:
+{f'''**策略建议**:
 **动作**: {data['strategy']['action']} (盈亏比 {data['strategy']['risk_reward']}:1)
 **买入**: ${data['strategy']['entry']:.4f}
 **止损**: ${data['strategy']['sl']:.4f}
@@ -528,20 +533,20 @@ class NotificationService:
 
 ---
 <font color='comment'>*Early Pump Detection*</font>
-"""
+        """
         logger.critical(f"🚀 触发主力拉盘警报 [{symbol}]，立即推送！")
         
-        # 优先发送到专用通道
-        if self.enable_pump_growth_channel:
-            if self.pump_growth_dingtalk_webhook:
+        # 优先发送到拉盘专用通道
+        if self.enable_pump_channel:
+            if self.pump_dingtalk_webhook:
                 await self.send_dingtalk(
                     message, 
                     at_all=True, 
-                    webhook=self.pump_growth_dingtalk_webhook,
-                    secret=self.pump_growth_dingtalk_secret
+                    webhook=self.pump_dingtalk_webhook,
+                    secret=self.pump_dingtalk_secret
                 )
-            if self.pump_growth_wechat_webhook:
-                await self.send_wechat(message, webhook=self.pump_growth_wechat_webhook)
+            if self.pump_wechat_webhook:
+                await self.send_wechat(message, webhook=self.pump_wechat_webhook)
         else:
             # 如果没有配置专用通道，发送到主通道
             if self.enable_dingtalk:
@@ -600,7 +605,7 @@ class NotificationService:
     async def send_realtime_pump_alert(self, data: Dict, is_strategy_learned: bool = False):
         """
         发送实时拉盘警报 (WebSocket 实时监控)
-        优先发送到专用通道，如果没有配置专用通道则发送到主通道
+        优先发送到拉盘专用通道，如果没有配置专用通道则发送到主通道
         
         Args:
             data: 警报数据
@@ -640,20 +645,20 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 
 ---
 <font color='comment'>*Realtime WebSocket Monitor - {market_label}*</font>
-"""
+        """
         logger.info(f"📢 触发实时拉盘警报 [{symbol} {market_label}]，推送通知...")
         
-        # 优先发送到专用通道
-        if self.enable_pump_growth_channel:
-            if self.pump_growth_dingtalk_webhook:
+        # 优先发送到拉盘专用通道
+        if self.enable_pump_channel:
+            if self.pump_dingtalk_webhook:
                 await self.send_dingtalk(
                     message, 
                     at_all=True, 
-                    webhook=self.pump_growth_dingtalk_webhook,
-                    secret=self.pump_growth_dingtalk_secret
+                    webhook=self.pump_dingtalk_webhook,
+                    secret=self.pump_dingtalk_secret
                 )
-            if self.pump_growth_wechat_webhook:
-                await self.send_wechat(message, webhook=self.pump_growth_wechat_webhook)
+            if self.pump_wechat_webhook:
+                await self.send_wechat(message, webhook=self.pump_wechat_webhook)
         else:
             # 如果没有配置专用通道，发送到主通道
             if self.enable_dingtalk:
@@ -664,7 +669,7 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
     async def send_steady_growth_alert(self, data: Dict, symbol: str, is_strategy_learned: bool = False):
         """
         发送稳步上涨警报 (Steady Growth)
-        优先发送到专用通道，如果没有配置专用通道则发送到主通道
+        优先发送到稳步上涨专用通道，如果没有配置专用通道则发送到主通道
         
         Args:
             data: 警报数据
@@ -693,8 +698,7 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 
 **分析**:
 监控到主力资金在做盘，走势温和且坚定 (15m级别)，适合顺势而为。
-{f'''
-**策略建议**:
+{f'''**策略建议**:
 **动作**: {data['strategy']['action']} (盈亏比 {data['strategy']['risk_reward']}:1)
 **买入**: ${data['strategy']['entry']:.4f}
 **止损**: ${data['strategy']['sl']:.4f}
@@ -702,20 +706,20 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 
 ---
 <font color='comment'>*Steady Growth Strategy (15m)*</font>
-"""
+        """
         logger.info(f"💎 触发稳步上涨警报 [{symbol}]，推送通知...")
         
-        # 优先发送到专用通道
-        if self.enable_pump_growth_channel:
-            if self.pump_growth_dingtalk_webhook:
+        # 优先发送到稳步上涨专用通道
+        if self.enable_growth_channel:
+            if self.growth_dingtalk_webhook:
                 await self.send_dingtalk(
                     message, 
                     at_all=False, 
-                    webhook=self.pump_growth_dingtalk_webhook,
-                    secret=self.pump_growth_dingtalk_secret
+                    webhook=self.growth_dingtalk_webhook,
+                    secret=self.growth_dingtalk_secret
                 )
-            if self.pump_growth_wechat_webhook:
-                await self.send_wechat(message, webhook=self.pump_growth_wechat_webhook)
+            if self.growth_wechat_webhook:
+                await self.send_wechat(message, webhook=self.growth_wechat_webhook)
         else:
             # 如果没有配置专用通道，发送到主通道
             if self.enable_dingtalk:

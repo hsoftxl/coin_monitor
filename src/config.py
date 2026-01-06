@@ -70,13 +70,21 @@ class Config:
     ENABLE_WECHAT = os.getenv('ENABLE_WECHAT', 'False').lower() == 'true'
     WECHAT_WEBHOOK = os.getenv('WECHAT_WEBHOOK', "")
     
-    # 拉盘/稳步上涨专用通知通道（独立通道）
-    ENABLE_PUMP_GROWTH_CHANNEL = os.getenv('ENABLE_PUMP_GROWTH_CHANNEL', 'True').lower() == 'true'
-    # 钉钉专用通道（拉盘/稳步上涨）
-    PUMP_GROWTH_DINGTALK_WEBHOOK = os.getenv('PUMP_GROWTH_DINGTALK_WEBHOOK', "https://oapi.dingtalk.com/robot/send?access_token=2b970a4f041047a653081784a1fc58f826179d4e840839e471f788fc4dece242")
-    PUMP_GROWTH_DINGTALK_SECRET = os.getenv('PUMP_GROWTH_DINGTALK_SECRET', "SECcc4cff6bd3ec64132278fa0ea9346ff09cdf81a2f32fb81b126f39ee954d5030")
-    # 企业微信专用通道（拉盘/稳步上涨）
-    PUMP_GROWTH_WECHAT_WEBHOOK = os.getenv('PUMP_GROWTH_WECHAT_WEBHOOK', "")
+    # 拉盘专用通知通道（独立通道）
+    ENABLE_PUMP_CHANNEL = os.getenv('ENABLE_PUMP_CHANNEL', 'True').lower() == 'true'
+    # 钉钉专用通道（拉盘）
+    PUMP_DINGTALK_WEBHOOK = os.getenv('PUMP_DINGTALK_WEBHOOK', "https://oapi.dingtalk.com/robot/send?access_token=2b970a4f041047a653081784a1fc58f826179d4e840839e471f788fc4dece242")
+    PUMP_DINGTALK_SECRET = os.getenv('PUMP_DINGTALK_SECRET', "SECcc4cff6bd3ec64132278fa0ea9346ff09cdf81a2f32fb81b126f39ee954d5030")
+    # 企业微信专用通道（拉盘）
+    PUMP_WECHAT_WEBHOOK = os.getenv('PUMP_WECHAT_WEBHOOK', "")
+    
+    # 稳步上涨专用通知通道（独立通道）
+    ENABLE_GROWTH_CHANNEL = os.getenv('ENABLE_GROWTH_CHANNEL', 'True').lower() == 'true'
+    # 钉钉专用通道（稳步上涨）
+    GROWTH_DINGTALK_WEBHOOK = os.getenv('GROWTH_DINGTALK_WEBHOOK', "https://oapi.dingtalk.com/robot/send?access_token=d4ac46e73ecc464d0b706927e5e7da1012bc1c817660511cad44f349466ddcb8")
+    GROWTH_DINGTALK_SECRET = os.getenv('GROWTH_DINGTALK_SECRET', "SEC1306f9cc4f750655a93de974b91d49246fe9b239797be6e6d8dd0635a02e7125")
+    # 企业微信专用通道（稳步上涨）
+    GROWTH_WECHAT_WEBHOOK = os.getenv('GROWTH_WECHAT_WEBHOOK', "")
     
     # 通知等级阈值（只推送这些等级的信号）
     NOTIFY_GRADES = ["A+", "A"]

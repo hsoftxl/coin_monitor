@@ -1,0 +1,46 @@
+# Python_pycache__/.py[cod]$py.class
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Logs
+logs/
+*.log
+
+# Testing
+.coverage
+pytest_cache/
+tests/
+
+# Documentation
+docs/
+
+# Data
+data/
+
+# Misc
+.dockerignore
+Dockerfile
+.docker/
+
+# Temporary files
+*.tmp
+*.temp

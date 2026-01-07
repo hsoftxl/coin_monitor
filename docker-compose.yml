@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  coin-monitor:
+    build: .
+    image: coin-monitor:latest
+    container_name: coin-monitor
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    # 无需端口映射，应用为后台服务
+    # 无需健康检查，应用为后台服务
+    networks:
+      - coin-monitor-network
+
+networks:
+  coin-monitor-network:
+    driver: bridge

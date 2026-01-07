@@ -26,6 +26,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 设置 Docker Buildx
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts:
+            - network=host
+
       # 登录到容器注册表
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -59,8 +68,11 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 使用 GitHub Actions 缓存
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # 明确使用 Buildx builder
+          builder: ${{ steps.buildx.outputs.name }}
 
       # 构建成功通知（可选）
       - name: Build success notification

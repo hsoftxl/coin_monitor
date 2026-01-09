@@ -101,6 +101,7 @@ class ExchangeConnector(ABC):
         """
         Executes a function with exponential backoff retry logic.
         """
+        import random
         retries = 3
         initial_delay = 2  # 增加初始延迟
         max_delay = 15     # 增加最大延迟到15秒
@@ -116,7 +117,6 @@ class ExchangeConnector(ABC):
                     # 针对限流错误使用更长的延迟
                     base_delay = initial_delay * (2 ** attempt) * 1.5
                     # 添加随机抖动，避免请求风暴
-                    import random
                     delay = min(base_delay + random.uniform(-jitter, jitter), max_delay)
                     await asyncio.sleep(delay)
                 elif isinstance(e, (asyncio.TimeoutError, TimeoutError)):

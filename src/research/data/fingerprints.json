@@ -1,0 +1,19 @@
+[
+  {
+    "symbol": "LIGHT/USDT:USDT",
+    "score": 64.1,
+    "metrics": {
+      "pir_median": 9.236839051717704,
+      "window_hit_rate": 0,
+      "positive_flow_ratio": 0.47433333333333333,
+      "big_order_ratio": 0.9997185817225549,
+      "strong_up_moves": 4,
+      "volume_concentration": 0.528782919290477,
+      "avg_upper_shadow": 0.11812530825651128,
+      "avg_lower_shadow": 0.12937139701190647,
+      "volatility_ratio": 1.0399900343225998
+    },
+    "created_at": "2026-01-12T16:13:25.670929",
+    "updated_at": "2026-01-12T16:13:25.670933"
+  }
+]

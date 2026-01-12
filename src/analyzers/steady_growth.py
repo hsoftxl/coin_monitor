@@ -73,8 +73,18 @@ class SteadyGrowthAnalyzer:
         
         if slope < self.min_ma_slope:
             return None
-            
-        # 4. Success!
+        
+        # 4. 用户要求：最近3根k线的平均成交量 > 过去10根k线平均值的1.3倍
+        recent_3_df = df.tail(3)
+        recent_3_avg = recent_3_df['volume'].mean()
+        past_10_df = df.iloc[-13:-3]  # 过去10根k线（排除最近3根）
+        past_10_avg = past_10_df['volume'].mean()
+        meets_3_vs_10_condition = recent_3_avg > (past_10_avg * 1.3)
+        
+        if not meets_3_vs_10_condition:
+            return None
+        
+        # 5. Success!
         self.cooldowns[symbol] = now
         current_price = recent['close'].iloc[-1]
         

@@ -63,13 +63,26 @@ class VolumeSpikeAnalyzer:
             pct_change = ((current_close - freq_open) / freq_open) * 100
         else:
             pct_change = 0.0
-            
+        
+        # 4. 用户要求：最近3根k线的平均成交量 > 过去10根k线平均值的1.3倍
+        recent_3_avg = 0.0
+        past_10_avg = 0.0
+        meets_3_vs_10_condition = False
+        
+        if len(df) >= 13:  # 至少需要13根k线数据
+            recent_3_df = df.tail(3)
+            recent_3_avg = recent_3_df['volume'].mean()
+            past_10_df = df.iloc[-13:-3]  # 过去10根k线（排除最近3根）
+            past_10_avg = past_10_df['volume'].mean()
+            meets_3_vs_10_condition = recent_3_avg > (past_10_avg * 1.3)
+        
         # Trigger Conditions
         # A. Volume > Factor (3.0)
         # B. Price Rising (Close > Open)
         # C. Price Change >= Min (0.5%)
+        # D. 最近3根k线成交量 > 过去10根k线平均值的1.3倍
         
-        is_spike = (ratio >= self.factor) and (pct_change >= self.min_price_change)
+        is_spike = (ratio >= self.factor) and (pct_change >= self.min_price_change) and meets_3_vs_10_condition
         
         if is_spike:
             # Update cooldown
@@ -83,7 +96,10 @@ class VolumeSpikeAnalyzer:
                 'avg_vol': avg_15m_vol,
                 'price_change': pct_change,
                 'current_price': current_close,
-                'grade': 'A' if ratio > 5 else 'B' 
+                'grade': 'A' if ratio > 5 else 'B',
+                'recent_3_avg': recent_3_avg,
+                'past_10_avg': past_10_avg,
+                '3_vs_10_ratio': recent_3_avg / past_10_avg
             }
             
         return None

@@ -43,7 +43,7 @@ class Config:
     STRATEGY_LEARNING_MAX_PARAM_COMBINATIONS = 20  # 每品种最大参数组合数
     
     # 24小时成交额过滤（只监控成交额大于此值的币种）
-    MIN_24H_QUOTE_VOLUME = 10000000  # 10M USDT
+    MIN_24H_QUOTE_VOLUME = 30000000  # 30M USDT
     
     # 排除的交易对
     EXCLUDED_SYMBOLS = ["USDC/USDT", "XUSD/USDT", "USDE/USDT"]

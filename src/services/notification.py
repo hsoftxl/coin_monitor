@@ -42,6 +42,12 @@ class NotificationService:
         self.growth_dingtalk_secret = Config.GROWTH_DINGTALK_SECRET
         self.growth_wechat_webhook = Config.GROWTH_WECHAT_WEBHOOK
         
+        # 资金费率专用通道配置
+        self.enable_funding_channel = Config.ENABLE_FUNDING_CHANNEL
+        self.funding_dingtalk_webhook = Config.FUNDING_DINGTALK_WEBHOOK
+        self.funding_dingtalk_secret = Config.FUNDING_DINGTALK_SECRET
+        self.funding_wechat_webhook = Config.FUNDING_WECHAT_WEBHOOK
+        
         # 消息队列（用于 B 级信号汇总）
         self.pending_b_signals = []
         self.last_b_summary_time = time.time()
@@ -74,7 +80,10 @@ class NotificationService:
         target_secret = secret or self.dingtalk_secret
         
         if not target_webhook:
+            logger.debug(f"❌ 钉钉推送失败: webhook为空")
             return False
+        
+        logger.debug(f"📤 准备发送钉钉消息: webhook={target_webhook[:30]}..., at_all={at_all}")
         
         try:
             # 构建 URL（含加签）
@@ -84,6 +93,9 @@ class NotificationService:
             if target_secret:
                 sign = self._generate_dingtalk_sign(timestamp, target_secret)
                 url = f"{url}&timestamp={timestamp}&sign={sign}"
+                logger.debug(f"🔐 钉钉URL已加签")
+            else:
+                logger.debug(f"🔓 钉钉URL未加签")
             
             # 构建消息体
             payload = {
@@ -96,11 +108,15 @@ class NotificationService:
             
             if at_all:
                 payload["at"] = {"isAtAll": True}
+                logger.debug(f"🔔 钉钉消息将@所有人")
             
             # 发送请求
+            logger.debug(f"📡 发送钉钉HTTP请求...")
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    logger.debug(f"📊 钉钉响应状态码: {resp.status}")
                     result = await resp.json()
+                    logger.debug(f"📝 钉钉响应内容: {result}")
                     if result.get('errcode') == 0:
                         logger.info("✅ 钉钉消息发送成功")
                         return True
@@ -110,10 +126,12 @@ class NotificationService:
         
         except (aiohttp.ClientError, ValueError, KeyError) as e:
             logger.error(f"❌ 钉钉推送异常: {e}")
+            logger.exception(e)
             # 只记录日志，不抛出异常，防止主程序崩溃
             return False
         except Exception as e:
             logger.error(f"❌ 钉钉推送未知异常: {e}")
+            logger.exception(e)
             # 只记录日志，不抛出异常，防止主程序崩溃
             return False
     
@@ -129,7 +147,10 @@ class NotificationService:
         target_webhook = webhook or self.wechat_webhook
         
         if not target_webhook:
+            logger.debug(f"❌ 企业微信推送失败: webhook为空")
             return False
+        
+        logger.debug(f"📤 准备发送企业微信消息: webhook={target_webhook[:30]}...")
         
         try:
             # 构建消息体
@@ -139,11 +160,15 @@ class NotificationService:
                     "content": message
                 }
             }
+            logger.debug(f"📝 企业微信消息体构建完成")
             
             # 发送请求
+            logger.debug(f"📡 发送企业微信HTTP请求...")
             async with aiohttp.ClientSession() as session:
                 async with session.post(target_webhook, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    logger.debug(f"📊 企业微信响应状态码: {resp.status}")
                     result = await resp.json()
+                    logger.debug(f"📝 企业微信响应内容: {result}")
                     if result.get('errcode') == 0:
                         logger.info("✅ 企业微信消息发送成功")
                         return True
@@ -153,10 +178,12 @@ class NotificationService:
         
         except (aiohttp.ClientError, ValueError, KeyError) as e:
             logger.error(f"❌ 企业微信推送异常: {e}")
+            logger.exception(e)
             # 只记录日志，不抛出异常，防止主程序崩溃
             return False
         except Exception as e:
             logger.error(f"❌ 企业微信推送未知异常: {e}")
+            logger.exception(e)
             # 只记录日志，不抛出异常，防止主程序崩溃
             return False
     
@@ -765,6 +792,81 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
              vol_str = f"${vol_24h/1000:.0f}k"
         else:
              vol_str = f"${vol_24h:.0f}"
-             
+              
         return f"**24h成交额**: {vol_str}"
+    
+    async def send_funding_rate_alert(self, funding_rate_data: Dict, symbol: str, exchange: str):
+        """
+        发送资金费率警报
+        优先发送到资金费率专用通道，如果没有配置专用通道则发送到主通道
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        funding_rate = funding_rate_data['funding_rate'] * 100  # 转换为百分比
+        next_funding_time = funding_rate_data.get('next_funding_time')
+        price = funding_rate_data.get('price')
+        
+        logger.debug(f"📝 开始处理资金费率警报: {symbol}@{exchange}, 费率: {funding_rate:.4f}%, 阈值: {Config.FUNDING_RATE_THRESHOLD}%")
+        
+        # 处理价格可能为None或非数字的情况
+        try:
+            price_formatted = f"${float(price):,.4f}" if price is not None else "暂无数据"
+        except (TypeError, ValueError):
+            price_formatted = "暂无数据"
+        
+        # 生成币安地址（根据市场类型）
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+        
+        message = f"""### ⚡ 资金费率异常警报
+        
+**币种**: **{symbol}** [{exchange.upper()}]
+**资金费率**: <font color='red'>**{funding_rate:.4f}%**</font>
+**触发阈值**: {Config.FUNDING_RATE_THRESHOLD}%
+**当前价格**: {price_formatted}
+**触发时间**: {timestamp}
+**币安地址**: [{symbol}]({binance_url})
+        
+---
+        
+**分析**:
+资金费率大幅偏离正常值，表明市场情绪极度失衡。高资金费率意味着多头支付高额费用给空头，可能预示短期市场反转或持续极端行情。
+        
+**建议**:
+- 多头谨慎追涨，注意回调风险
+- 空头可以考虑开仓或持有仓位
+- 关注资金费率变化趋势，可能预示市场转折点
+        
+---
+<font color='comment'>*实时资金费率监控*</font>
+        """
+        logger.info(f"⚡ 触发资金费率警报 [{symbol}]，推送通知...")
+        
+        # 优先发送到资金费率专用通道
+        if self.enable_funding_channel:
+            logger.debug(f"🔗 启用资金费率专用通道，dingtalk: {bool(self.funding_dingtalk_webhook)}, wechat: {bool(self.funding_wechat_webhook)}")
+            if self.funding_dingtalk_webhook:
+                logger.debug(f"📤 通过资金费率专用钉钉通道发送: {self.funding_dingtalk_webhook[:30]}...")
+                result = await self.send_dingtalk(
+                    message, 
+                    at_all=True, 
+                    webhook=self.funding_dingtalk_webhook,
+                    secret=self.funding_dingtalk_secret
+                )
+                logger.debug(f"✅ 资金费率专用钉钉通道发送结果: {result}")
+            if self.funding_wechat_webhook:
+                logger.debug(f"📤 通过资金费率专用微信通道发送: {self.funding_wechat_webhook[:30]}...")
+                result = await self.send_wechat(message, webhook=self.funding_wechat_webhook)
+                logger.debug(f"✅ 资金费率专用微信通道发送结果: {result}")
+        else:
+            # 如果没有配置专用通道，发送到主通道
+            logger.debug(f"🔗 未启用资金费率专用通道，使用主通道")
+            logger.debug(f"📤 主通道配置: dingtalk_enabled={self.enable_dingtalk}, wechat_enabled={self.enable_wechat}")
+            if self.enable_dingtalk:
+                logger.debug(f"📤 通过主钉钉通道发送")
+                result = await self.send_dingtalk(message, at_all=True)
+                logger.debug(f"✅ 主钉钉通道发送结果: {result}")
+            if self.enable_wechat:
+                logger.debug(f"📤 通过主微信通道发送")
+                result = await self.send_wechat(message)
+                logger.debug(f"✅ 主微信通道发送结果: {result}")
+        logger.debug(f"📝 资金费率警报处理完成: {symbol}")
 

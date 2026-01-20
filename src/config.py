@@ -49,7 +49,7 @@ class Config:
     EXCLUDED_SYMBOLS = ["USDC/USDT", "XUSD/USDT", "USDE/USDT"]
     
     # 日志级别
-    LOG_LEVEL = "INFO"
+    LOG_LEVEL = "DEBUG"
     
     # ==================== 交易所配置 ====================
     EXCHANGES = {
@@ -169,6 +169,19 @@ class Config:
     
     # ==================== 多平台共识配置 (P0新增) ====================
     MIN_EXCHANGE_CONSENSUS = 2         # 至少需要N个交易所确认
+
+    # ==================== 资金费率监控配置 ====================
+    ENABLE_FUNDING_RATE_MONITOR = True  # 是否启用资金费率监控
+    FUNDING_RATE_THRESHOLD = 0.01        # 资金费率阈值 %
+    FUNDING_RATE_CHECK_INTERVAL = 60    # 检查间隔 (秒)
+
+    # ==================== 资金费率专用通知通道 ====================
+    ENABLE_FUNDING_CHANNEL = os.getenv('ENABLE_FUNDING_CHANNEL', 'True').lower() == 'true'
+    # 钉钉专用通道（资金费率）
+    FUNDING_DINGTALK_WEBHOOK = os.getenv('FUNDING_DINGTALK_WEBHOOK', "https://oapi.dingtalk.com/robot/send?access_token=8e8ac7ddf8e7ce5c585060b50b0c13faa89bb5b9046e573a0dd011f26c40026a")
+    FUNDING_DINGTALK_SECRET = os.getenv('FUNDING_DINGTALK_SECRET', "SEC8e76b28750ecfa8e5673a29429cc236ab828bd8d28effd46ebe5643aab1dc7b7")
+    # 企业微信专用通道（资金费率）
+    FUNDING_WECHAT_WEBHOOK = os.getenv('FUNDING_WECHAT_WEBHOOK', "")
 
     # ==================== 策略学习配置 (新增) ====================
     ENABLE_STRATEGY_LEARNING = True    # 是否启用策略学习

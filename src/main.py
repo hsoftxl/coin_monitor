@@ -19,6 +19,7 @@ from src.analyzers.panic_dump import PanicDumpAnalyzer
 from src.utils.discovery import SymbolDiscovery
 from src.services.notification import NotificationService
 from src.services.realtime_monitor import RealtimeMonitor
+from src.services.funding_rate_monitor import FundingRateMonitor
 from src.strategies.entry_exit import EntryExitStrategy
 from src.analyzers.steady_growth import SteadyGrowthAnalyzer
 from src.storage.persistence import Persistence
@@ -247,6 +248,15 @@ async def main():
         realtime_monitor = RealtimeMonitor(notification_service=notification_service, strategy=strategy)
         realtime_task = asyncio.create_task(realtime_monitor.start())
         logger.info("✅ 实时监控已在后台运行")
+    
+    # 启动资金费率监控器（后台任务）
+    funding_task = None
+    funding_monitor = None
+    if Config.ENABLE_FUNDING_RATE_MONITOR:
+        logger.info("🚀 启动资金费率监控器...")
+        funding_monitor = FundingRateMonitor()
+        funding_task = asyncio.create_task(funding_monitor.run())
+        logger.info("✅ 资金费率监控已在后台运行")
 
     # 排除配置的品种
     target_symbols = [s for s in target_symbols if s not in Config.EXCLUDED_SYMBOLS]
@@ -333,6 +343,16 @@ async def main():
                 logger.info("实时监控任务已取消")
             except Exception as e:
                 logger.error(f"取消实时监控任务时出错: {e}")
+        
+        # 取消资金费率监控任务
+        if funding_task:
+            funding_task.cancel()
+            try:
+                await funding_task
+            except asyncio.CancelledError:
+                logger.info("资金费率监控任务已取消")
+            except Exception as e:
+                logger.error(f"取消资金费率监控任务时出错: {e}")
 
 if __name__ == "__main__":
     try:

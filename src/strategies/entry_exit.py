@@ -62,40 +62,22 @@ class EntryExitStrategy:
             elif close < sma20: trend_1h = "BEARISH"
             
         has_strong_signal = any(s.get('grade') in ('A+', 'A') for s in signals)
-        bullish_consensus = '看涨' in consensus
-        bearish_consensus = '看跌' in consensus
+        # consensus参数已废弃，不再使用
+        bullish_consensus = False
+        bearish_consensus = False
         
         now = time.time()
         last_ts = self.last_action_time.get(symbol, 0)
         if last_ts and now - last_ts < self.min_interval_sec:
             return {'action': None, 'symbol': symbol}
             
-        # Update Consensus Streak with Direction Reset
-        streak_data = self.consensus_streak.get(symbol, {'count': 0, 'direction': 'NEUTRAL'})
-        current_direction = 'NEUTRAL'
-        if bullish_consensus: current_direction = 'BULLISH'
-        elif bearish_consensus: current_direction = 'BEARISH'
-        
-        if current_direction != 'NEUTRAL':
-            if current_direction == streak_data['direction']:
-                streak_data['count'] += 1
-            else:
-                streak_data['count'] = 1
-                streak_data['direction'] = current_direction
-        else:
-            streak_data['count'] = 0
-            streak_data['direction'] = 'NEUTRAL'
-            
-        self.consensus_streak[symbol] = streak_data
-        streak = streak_data['count']
+        # 不再使用consensus_streak，因为consensus参数已废弃
+        streak = 0
         
         midband_ok = True
         if self.require_midband and support > 0 and resistance > 0:
             mid = (support + resistance) / 2.0
-            if bullish_consensus and current_price < mid:
-                midband_ok = False
-            if bearish_consensus and current_price > mid:
-                midband_ok = False
+            # 由于consensus已废弃，这里不再检查midband
         
         # ENTRY LOGIC
         action = None
@@ -103,16 +85,16 @@ class EntryExitStrategy:
         reason = None
         
         # Long Entry
-        if bullish_consensus and (has_strong_signal or (total_flow >= self.min_total_flow and avg_ratio >= self.min_ratio)):
+        if has_strong_signal or (total_flow >= self.min_total_flow and avg_ratio >= self.min_ratio):
             # MTF Confirmation: Don't go long if 1h trend is bearish
             mtf_ok = True
             if trend_1h == "BEARISH": 
                 mtf_ok = False
             
-            if midband_ok and streak >= self.min_consensus_bars and mtf_ok:
+            if midband_ok and mtf_ok:
                 action = 'ENTRY'
                 side = 'LONG'
-                reason = f'Bullish Consensus + Trend({trend_1h})'
+                reason = f'Strong Signal + Trend({trend_1h})'
 
         # Short Entry (DISABLED)
         # elif bearish_consensus and total_flow <= -self.min_total_flow:
@@ -176,7 +158,7 @@ class EntryExitStrategy:
         if support > 0 and current_price < support:
             self.last_action_time[symbol] = now
             return {'action': 'EXIT', 'side': 'LONG', 'price': current_price, 'reason': 'break_support', 'symbol': symbol}
-        if resistance > 0 and current_price > resistance and not bullish_consensus:
+        if resistance > 0 and current_price > resistance:
             self.last_action_time[symbol] = now
             return {'action': 'EXIT', 'side': 'SHORT', 'price': current_price, 'reason': 'break_resistance', 'symbol': symbol}
             

@@ -49,7 +49,7 @@ class Config:
     EXCLUDED_SYMBOLS = ["USDC/USDT", "XUSD/USDT", "USDE/USDT"]
     
     # 日志级别
-    LOG_LEVEL = "DEBUG"
+    LOG_LEVEL = "INFO"
     
     # ==================== 交易所配置 ====================
     EXCHANGES = {
@@ -78,29 +78,11 @@ class Config:
     # 企业微信专用通道（拉盘）
     PUMP_WECHAT_WEBHOOK = os.getenv('PUMP_WECHAT_WEBHOOK', "")
     
-    # 稳步上涨专用通知通道（独立通道）
-    ENABLE_GROWTH_CHANNEL = os.getenv('ENABLE_GROWTH_CHANNEL', 'True').lower() == 'true'
-    # 钉钉专用通道（稳步上涨）
-    GROWTH_DINGTALK_WEBHOOK = os.getenv('GROWTH_DINGTALK_WEBHOOK', "https://oapi.dingtalk.com/robot/send?access_token=d4ac46e73ecc464d0b706927e5e7da1012bc1c817660511cad44f349466ddcb8")
-    GROWTH_DINGTALK_SECRET = os.getenv('GROWTH_DINGTALK_SECRET', "SEC1306f9cc4f750655a93de974b91d49246fe9b239797be6e6d8dd0635a02e7125")
-    # 企业微信专用通道（稳步上涨）
-    GROWTH_WECHAT_WEBHOOK = os.getenv('GROWTH_WECHAT_WEBHOOK', "")
-    
     # 通知等级阈值（只推送这些等级的信号）
     NOTIFY_GRADES = ["A+", "A"]
     
-    # ==================== 巨鲸监控配置 ====================
-    WHALE_THRESHOLD = 200000.0  # 监测阈值：$200k
-    ENABLE_WHALE_NOTIFY = True  # 是否推送巨鲸通知
-    WHALE_NOTIFY_THRESHOLD = 500000.0  # 推送阈值：>= $500k
-    
     # ==================== 市场共识通知 ====================
     ENABLE_CONSENSUS_NOTIFY = False  # 推送强力看涨/看跌共识（已禁用）
-    
-    # ==================== Volume Spike 策略配置 ====================
-    SPIKE_VOL_FACTOR = 3.0           # 成交量倍数（当前15m vs 5h均值）
-    SPIKE_COOLDOWN_MINUTES = 30      # 冷却时间（分钟）
-    SPIKE_MIN_PRICE_CHANGE = 0.5     # 最小涨幅 %
     
     # ==================== Early Pump 策略配置 ====================
     EARLY_PUMP_MIN_CHANGE = 1.0      # 最小涨幅 %（1分钟内）
@@ -172,7 +154,7 @@ class Config:
 
     # ==================== 资金费率监控配置 ====================
     ENABLE_FUNDING_RATE_MONITOR = True  # 是否启用资金费率监控
-    FUNDING_RATE_THRESHOLD = 0.01        # 资金费率阈值 %
+    FUNDING_RATE_THRESHOLD = 0.6        # 资金费率阈值 %
     FUNDING_RATE_CHECK_INTERVAL = 60    # 检查间隔 (秒)
 
     # ==================== 资金费率专用通知通道 ====================

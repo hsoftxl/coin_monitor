@@ -10,11 +10,8 @@ from dataclasses import dataclass
 
 from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
-from src.analyzers.whale_watcher import WhaleWatcher
-from src.analyzers.volume_spike import VolumeSpikeAnalyzer
 from src.analyzers.early_pump import EarlyPumpAnalyzer
 from src.analyzers.panic_dump import PanicDumpAnalyzer
-from src.analyzers.steady_growth import SteadyGrowthAnalyzer
 from src.analyzers.spot_futures_analyzer import SpotFuturesAnalyzer
 from src.strategies.entry_exit import EntryExitStrategy
 
@@ -44,11 +41,8 @@ class AnalysisContext:
     # 分析器
     taker_analyzer: TakerFlowAnalyzer
     multi_analyzer: MultiPlatformAnalyzer
-    whale_watcher: WhaleWatcher
-    vol_spike_analyzer: VolumeSpikeAnalyzer
     early_pump_analyzer: EarlyPumpAnalyzer
     panic_dump_analyzer: PanicDumpAnalyzer
-    steady_growth_analyzer: SteadyGrowthAnalyzer
     sf_analyzer: SpotFuturesAnalyzer
     
     # 策略

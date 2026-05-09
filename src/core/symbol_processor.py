@@ -181,19 +181,6 @@ async def analyze_platform(
     
     signals = []
     
-    # Volume Spike Analysis
-    spike = ctx.vol_spike_analyzer.analyze(df, symbol)
-    if spike:
-         spike['vol_24h'] = ticker_24h_vol
-         logger.warning(f"🔥 [{symbol}] 成交量暴增: {spike['ratio']:.1f}x (涨幅 {spike['price_change']:.2f}%)")
-         if ctx.notification_service:
-             await ctx.notification_service.send_volume_spike_alert(spike, symbol)
-         signals.append(('volume_spike', spike))
-             
-    # Whale Analysis (for Confirmation)
-    current_whales = []
-    if isinstance(trade_result, list) and trade_result:
-        current_whales = ctx.whale_watcher.check_trades(trade_result)
 
     # Early Pump Analysis
     sf_strength = sf_correlation['strength'] if sf_correlation else None
@@ -201,8 +188,7 @@ async def analyze_platform(
         df, 
         symbol,
         df_res=df_res,
-        sf_strength=sf_strength,
-        whales=current_whales
+        sf_strength=sf_strength
     )
     if pump:
          pump['vol_24h'] = ticker_24h_vol
@@ -219,12 +205,11 @@ async def analyze_platform(
     dump = None
     if allow_short:
         dump = ctx.panic_dump_analyzer.analyze(
-            df,
-            symbol,
-            df_res=df_res,
-            sf_strength=sf_strength,
-            whales=current_whales
-        )
+        df,
+        symbol,
+        df_res=df_res,
+        sf_strength=sf_strength
+    )
         
     if dump:
          dump['vol_24h'] = ticker_24h_vol
@@ -233,16 +218,7 @@ async def analyze_platform(
              await ctx.notification_service.send_panic_dump_alert(dump, symbol)
          signals.append(('panic_dump', dump))
 
-    # Steady Growth Analysis
-    steady = ctx.steady_growth_analyzer.analyze(df_res, symbol)
-    if steady:
-         steady['vol_24h'] = ticker_24h_vol
-         logger.info(f"💎 [{symbol}] {steady['desc']}")
-         if ctx.notification_service:
-             # 检查策略是否是学习后的
-             is_strategy_learned = hasattr(ctx.strategy, 'is_strategy_learned') and ctx.strategy.is_strategy_learned
-             await ctx.notification_service.send_steady_growth_alert(steady, symbol, is_strategy_learned=is_strategy_learned)
-         signals.append(('steady_growth', steady))
+
     
     return {
         'metrics': metrics,
@@ -274,9 +250,6 @@ async def aggregate_signals(
     if len(platform_metrics) < 2:
         return {'consensus': '数据不足', 'signals': []}
     
-    # Consensus & Signals
-    consensus = ctx.multi_analyzer.get_market_consensus(platform_metrics)
-    
     # Log Output
     log_parts = []
     total_flow = 0
@@ -287,22 +260,12 @@ async def aggregate_signals(
         short_name = name[:3].upper()
         log_parts.append(f"{short_name}:<{tag}>{flow/1000:.0f}k</{tag}>")
     
-    # Determine consensus color
-    cons_tag = "white"
-    if "看涨" in consensus or "BULLISH" in consensus: cons_tag = "green"
-    elif "看跌" in consensus or "BEARISH" in consensus: cons_tag = "red"
-    
-    logger.info(f"💰 <bold>{symbol.ljust(9)}</bold> | 共识: <{cons_tag}>{consensus.split('(')[0]}</{cons_tag}> | {' | '.join(log_parts)}")
-    
-    # 推送市场共识通知
-    if ctx.notification_service:
-        await ctx.notification_service.send_consensus_alert(consensus, platform_metrics, symbol)
+    logger.info(f"💰 <bold>{symbol.ljust(9)}</bold> | {' | '.join(log_parts)}")
 
     # Signals
     signals = ctx.multi_analyzer.analyze_signals(platform_metrics, symbol=symbol, df_5m=df, df_1h=df_res)
     
     return {
-        'consensus': consensus,
         'signals': signals,
         'platform_metrics': platform_metrics
     }
@@ -310,7 +273,6 @@ async def aggregate_signals(
 
 async def generate_recommendations(
     symbol: str,
-    consensus: str,
     signals: List[Dict[str, Any]],
     platform_metrics: Dict[str, Dict[str, Any]],
     df: Optional[pd.DataFrame],
@@ -323,7 +285,6 @@ async def generate_recommendations(
     
     Args:
         symbol: 交易对符号
-        consensus: 市场共识
         signals: 信号列表
         platform_metrics: 平台指标
         df: 主时间框架数据
@@ -334,7 +295,7 @@ async def generate_recommendations(
     Returns:
         策略建议字典，如果没有建议则返回 None
     """
-    rec = ctx.strategy.evaluate(platform_metrics, consensus, signals, symbol, df_5m=df, df_1h=df_res)
+    rec = ctx.strategy.evaluate(platform_metrics, None, signals, symbol, df_5m=df, df_1h=df_res)
     
     pos = ctx.strategy.compute_position(rec, volatility_level=volatility_level) if rec.get('action') else {}
     rec.update(pos)

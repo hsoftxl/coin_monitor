@@ -12,7 +12,7 @@ from src.analyzers.whale_watcher import WhaleWatcher
 from src.analyzers.volume_spike import VolumeSpikeAnalyzer
 from src.analyzers.early_pump import EarlyPumpAnalyzer
 from src.analyzers.panic_dump import PanicDumpAnalyzer
-from src.analyzers.steady_growth import SteadyGrowthAnalyzer
+
 from src.analyzers.spot_futures_analyzer import SpotFuturesAnalyzer
 from src.strategies.entry_exit import EntryExitStrategy
 
@@ -83,7 +83,6 @@ def mock_analysis_context(mocker):
     vol_spike_analyzer = VolumeSpikeAnalyzer()
     early_pump_analyzer = EarlyPumpAnalyzer()
     panic_dump_analyzer = PanicDumpAnalyzer()
-    steady_growth_analyzer = SteadyGrowthAnalyzer()
     sf_analyzer = SpotFuturesAnalyzer()
     strategy = EntryExitStrategy()
     
@@ -95,7 +94,6 @@ def mock_analysis_context(mocker):
         vol_spike_analyzer=vol_spike_analyzer,
         early_pump_analyzer=early_pump_analyzer,
         panic_dump_analyzer=panic_dump_analyzer,
-        steady_growth_analyzer=steady_growth_analyzer,
         sf_analyzer=sf_analyzer,
         strategy=strategy
     )

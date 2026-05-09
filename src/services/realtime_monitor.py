@@ -162,12 +162,10 @@ class RealtimeMonitor:
                 # Set connection timeout
                 async with websockets.connect(
                     url,
-                    ping_interval=30,  # 延长Ping间隔到30秒
-                    ping_timeout=15,    # 延长Ping超时到15秒
-                    close_timeout=15,   # 延长关闭超时到15秒
-                    max_size=2**20,     # 增加最大消息大小到1MB
-                    read_limit=2**20,   # 增加读取限制
-                    write_limit=2**20   # 增加写入限制
+                    ping_interval=30,
+                    ping_timeout=15,
+                    close_timeout=15,
+                    max_size=2**20
                 ) as websocket:
                     logger.info(f"[实时监控] {market_type.upper()} #{chunk_id} 连接成功")
                     reconnect_count = 0

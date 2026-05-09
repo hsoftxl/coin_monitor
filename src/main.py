@@ -11,8 +11,6 @@ from src.connectors.coinbase import CoinbaseConnector
 from src.processors.data_processor import DataProcessor
 from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
-from src.analyzers.whale_watcher import WhaleWatcher
-from src.analyzers.volume_spike import VolumeSpikeAnalyzer
 from src.analyzers.spot_futures_analyzer import SpotFuturesAnalyzer
 from src.analyzers.early_pump import EarlyPumpAnalyzer
 from src.analyzers.panic_dump import PanicDumpAnalyzer
@@ -21,7 +19,6 @@ from src.services.notification import NotificationService
 from src.services.realtime_monitor import RealtimeMonitor
 from src.services.funding_rate_monitor import FundingRateMonitor
 from src.strategies.entry_exit import EntryExitStrategy
-from src.analyzers.steady_growth import SteadyGrowthAnalyzer
 from src.storage.persistence import Persistence
 from src.utils.market_regime import MarketRegimeDetector
 from src.core.context import AnalysisContext
@@ -104,7 +101,7 @@ async def process_symbol(symbol: str, ctx: AnalysisContext) -> None:
     if valid_data_count < 2:
         return
     
-    # 3. Aggregate signals and consensus
+    # 3. Aggregate signals
     aggregation_result = await aggregate_signals(
         symbol=symbol,
         platform_metrics=platform_metrics,
@@ -113,7 +110,6 @@ async def process_symbol(symbol: str, ctx: AnalysisContext) -> None:
         ctx=ctx
     )
     
-    consensus = aggregation_result['consensus']
     signals = aggregation_result['signals']
     
     # Process signals
@@ -127,7 +123,6 @@ async def process_symbol(symbol: str, ctx: AnalysisContext) -> None:
     # 4. Generate recommendations
     await generate_recommendations(
         symbol=symbol,
-        consensus=consensus,
         signals=signals,
         platform_metrics=platform_metrics,
         df=main_df,
@@ -136,21 +131,7 @@ async def process_symbol(symbol: str, ctx: AnalysisContext) -> None:
         ctx=ctx
     )
     
-    # 5. Whale Watcher (separate loop for all trades)
-    for i, (name, _) in enumerate(valid_connectors.items()):
-        if i < len(trade_results):
-            t_res = trade_results[i]
-            if isinstance(t_res, list) and t_res:
-                whales = ctx.whale_watcher.check_trades(t_res)
-                for w in whales:
-                    side = w['side'].upper()
-                    side_cn = "买入" if side == 'BUY' else "卖出"
-                    color = "green" if side == 'BUY' else "red"
-                    logger.warning(f"🐳 [{symbol}] 巨鲸监测 [{name.upper()}]: <{color}>{side_cn} ${w['cost']:,.0f}</{color}> @ {w['price']}")
-                    
-                    # 推送巨鲸通知
-                    if ctx.notification_service:
-                        await ctx.notification_service.send_whale_alert(w, symbol, name)
+
 
 
 async def main():
@@ -215,13 +196,10 @@ async def main():
             logger.warning("回退到默认币种。")
 
     taker_analyzer = TakerFlowAnalyzer(window=50)
-    vol_spike_analyzer = VolumeSpikeAnalyzer()
     early_pump_analyzer = EarlyPumpAnalyzer()
     panic_dump_analyzer = PanicDumpAnalyzer()
-    steady_growth_analyzer = SteadyGrowthAnalyzer()
     multi_analyzer = MultiPlatformAnalyzer()
     sf_analyzer = SpotFuturesAnalyzer()  # Spot-Futures correlation analyzer
-    whale_watcher = WhaleWatcher(threshold=Config.WHALE_THRESHOLD) # $200k
     
     market_regime_detector = MarketRegimeDetector() # P1/P2 新增
 
@@ -297,11 +275,8 @@ async def main():
                 connectors=initialized,
                 taker_analyzer=taker_analyzer,
                 multi_analyzer=multi_analyzer,
-                whale_watcher=whale_watcher,
-                vol_spike_analyzer=vol_spike_analyzer,
                 early_pump_analyzer=early_pump_analyzer,
                 panic_dump_analyzer=panic_dump_analyzer,
-                steady_growth_analyzer=steady_growth_analyzer,
                 sf_analyzer=sf_analyzer,
                 strategy=strategy,
                 notification_service=notification_service,

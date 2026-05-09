@@ -36,11 +36,7 @@ class NotificationService:
         self.pump_dingtalk_secret = Config.PUMP_DINGTALK_SECRET
         self.pump_wechat_webhook = Config.PUMP_WECHAT_WEBHOOK
         
-        # 稳步上涨专用通道配置
-        self.enable_growth_channel = Config.ENABLE_GROWTH_CHANNEL
-        self.growth_dingtalk_webhook = Config.GROWTH_DINGTALK_WEBHOOK
-        self.growth_dingtalk_secret = Config.GROWTH_DINGTALK_SECRET
-        self.growth_wechat_webhook = Config.GROWTH_WECHAT_WEBHOOK
+
         
         # 资金费率专用通道配置
         self.enable_funding_channel = Config.ENABLE_FUNDING_CHANNEL
@@ -202,10 +198,7 @@ class NotificationService:
             color_tag = "green" if flow > 0 else "red"
             flow_lines.append(f"- {emoji} **{name.upper()}**: <font color='{color_tag}'>{flow_k:+.0f}k USDT</font>")
         
-        # 获取市场共识
-        from src.analyzers.multi_platform import MultiPlatformAnalyzer
-        analyzer = MultiPlatformAnalyzer()
-        consensus = analyzer.get_market_consensus(platform_metrics)
+
         
         # 根据信号等级给出行动建议
         grade = signal.get('grade', 'C')
@@ -230,8 +223,6 @@ class NotificationService:
 
 **平台资金流向** (过去50分钟):
 {chr(10).join(flow_lines)}
-
-**市场共识**: {consensus}
 
 ---
 
@@ -321,119 +312,9 @@ class NotificationService:
         self.last_b_summary_time = time.time()
         logger.info(f"✅ B 级信号汇总已发送")
     
-    async def send_whale_alert(self, whale_data: Dict, symbol: str, exchange: str):
-        """
-        发送巨鲸交易警报
-        """
-        if not Config.ENABLE_WHALE_NOTIFY:
-            return
-        
-        # 检查是否达到推送阈值
-        if whale_data['cost'] < Config.WHALE_NOTIFY_THRESHOLD:
-            return
-        
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        side = whale_data['side'].upper()
-        side_cn = "买入" if side == 'BUY' else "卖出"
-        emoji = "📈" if side == 'BUY' else "📉"
-        
-        # 构建消息
-        # 生成币安地址（根据市场类型）
-        binance_url = self._get_binance_url(symbol, lang="en")
-        
-        message = f"""### 🐳 巨鲸交易警报
 
-**币种**: **{symbol}**
-**交易所**: {exchange.upper()}
-**方向**: {emoji} **{side_cn}**
-**金额**: <font color='{"green" if side == "BUY" else "red"}'>**${whale_data['cost']:,.0f}**</font>
-**价格**: ${whale_data['price']:,.4f}
-**时间**: {timestamp}
-**币安地址**: [{symbol}]({binance_url})
-
----
-
-**分析**:
-{'🟢 大资金主动买入，可能预示上涨趋势' if side == 'BUY' else '🔴 大资金主动卖出，可能预示下跌趋势'}
-
----
-<font color='comment'>*实时巨鲸监控 - 阈值: ${Config.WHALE_NOTIFY_THRESHOLD:,.0f}*</font>
-"""
-        
-        logger.info(f"📢 触发巨鲸警报，推送通知...")
-        
-        # 钉钉推送（不 @所有人）
-        if self.enable_dingtalk:
-            await self.send_dingtalk(message, at_all=False)
-        
-        # 企业微信推送
-        if self.enable_wechat:
-            await self.send_wechat(message)
     
-    async def send_consensus_alert(self, consensus: str, platform_metrics: Dict, symbol: str):
-        """
-        发送市场共识警报（强力看涨/看跌）
-        """
-        if not Config.ENABLE_CONSENSUS_NOTIFY:
-            return
-        
-        # 只推送强力看涨和强力看跌
-        if "强力看涨" not in consensus and "强力看跌" not in consensus:
-            return
-        
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 判断方向
-        is_bullish = "看涨" in consensus
-        emoji = "🚀" if is_bullish else "⚠️"
-        color = "green" if is_bullish else "red"
-        
-        # 构建平台资金流向
-        flow_lines = []
-        for name, metrics in platform_metrics.items():
-            flow = metrics.get('cumulative_net_flow', 0)
-            flow_k = flow / 1000
-            flow_emoji = "📈" if flow > 0 else "📉"
-            flow_color = "green" if flow > 0 else "red"
-            flow_lines.append(f"- {flow_emoji} **{name.upper()}**: <font color='{flow_color}'>{flow_k:+.0f}k USDT</font>")
-        
-        # 生成币安地址（根据市场类型）
-        binance_url = self._get_binance_url(symbol, lang="en")
-        
-        # 构建消息
-        message = f"""### {emoji} 市场共识警报
 
-**币种**: **{symbol}**
-**共识**: <font color='{color}'>**{consensus}**</font>
-**触发时间**: {timestamp}
-**币安地址**: [{symbol}]({binance_url})
-
----
-
-**平台资金流向** (过去50分钟):
-{chr(10).join(flow_lines)}
-
----
-
-**分析**:
-{'🟢 全平台一致看多，主力资金同步建仓，市场情绪高度一致' if is_bullish else '🔴 全平台一致看空，主力资金同步撤离，市场情绪极度悲观'}
-
-**建议**:
-{'📈 适合追涨或加仓，止损设置在关键支撑位' if is_bullish else '📉 建议观望或减仓，等待市场企稳信号'}
-
----
-<font color='comment'>*全平台共识监控*</font>
-"""
-        
-        logger.info(f"📢 触发市场共识警报 ({consensus})，推送通知...")
-        
-        # 钉钉推送（@所有人）
-        if self.enable_dingtalk:
-            await self.send_dingtalk(message, at_all=True)
-        
-        # 企业微信推送
-        if self.enable_wechat:
-            await self.send_wechat(message)
     
     async def send_strategy_recommendation(self, recommendation: Dict, platform_metrics: Dict):
         if not Config.ENABLE_STRATEGY:
@@ -479,49 +360,7 @@ class NotificationService:
         if self.enable_wechat:
             await self.send_wechat(text)
 
-    async def send_volume_spike_alert(self, spike_data: Dict, symbol: str):
-        """
-        发送成交量暴增警报
-        """
-        # 即使只开启了钉钉或微信其中一个，也应该发送
-        if not (self.enable_dingtalk or self.enable_wechat):
-            return
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ratio = spike_data['ratio']
-        change = spike_data['price_change']
-        price = spike_data['current_price']
-        
-        emoji = "🔥" if ratio > 5 else "⚡️"
-        
-        # 生成币安地址（根据市场类型）
-        binance_url = self._get_binance_url(symbol, lang="zh-CN")
-        
-        message = f"""### {emoji} 成交量暴增警报
-        
-**币种**: **{symbol}**
-**放量倍数**: <font color='red'>**{ratio:.1f}x**</font> (近15m vs 5h均值)
-**15m涨幅**: <font color='red'>**+{change:.2f}%**</font>
-**当前价格**: ${price:,.4f}
-**触发时间**: {timestamp}
-{self._format_24h_vol(spike_data.get('vol_24h', 0))}
-**币安地址**: [{symbol}]({binance_url})
-
----
-
-**分析**:
-短期内有大量资金涌入且推高价格，可能开启短线爆发趋势。
-
----
-<font color='comment'>*Volume Spike Strategy*</font>
-"""
-        logger.info(f"📢 触发成交量暴增警报 [{symbol}]，推送通知...")
-        
-        if self.enable_dingtalk:
-            await self.send_dingtalk(message, at_all=False)
-            
-        if self.enable_wechat:
-            await self.send_wechat(message)
 
     async def send_early_pump_alert(self, data: Dict, symbol: str):
         """
@@ -693,66 +532,7 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
             if self.enable_wechat:
                 await self.send_wechat(message)
 
-    async def send_steady_growth_alert(self, data: Dict, symbol: str, is_strategy_learned: bool = False):
-        """
-        发送稳步上涨警报 (Steady Growth)
-        优先发送到稳步上涨专用通道，如果没有配置专用通道则发送到主通道
-        
-        Args:
-            data: 警报数据
-            symbol: 币种符号
-            is_strategy_learned: 是否是策略学习后的信号
-        """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        price = data['price']
-        
-        # 添加策略学习标记
-        strategy_tag = "【策略学习】" if is_strategy_learned else ""
-        
-        # 生成币安地址（根据市场类型）
-        binance_url = self._get_binance_url(symbol, lang="zh-CN")
-        
-        message = f"""### 💎 {strategy_tag}稳步上涨趋势确认
-        
-**币种**: **{symbol}**
-**形态**: 均线多头排列 (MA20 > MA60)
-**当前价格**: ${price:,.4f}
-**触发时间**: {timestamp}
-{self._format_24h_vol(data.get('vol_24h', 0))}
-**币安地址**: [{symbol}]({binance_url})
 
----
-
-**分析**:
-监控到主力资金在做盘，走势温和且坚定 (15m级别)，适合顺势而为。
-{f'''**策略建议**:
-**动作**: {data['strategy']['action']} (盈亏比 {data['strategy']['risk_reward']}:1)
-**买入**: ${data['strategy']['entry']:.4f}
-**止损**: ${data['strategy']['sl']:.4f}
-**止盈**: ${data['strategy']['tp']:.4f}''' if 'strategy' in data else ''}
-
----
-<font color='comment'>*Steady Growth Strategy (15m)*</font>
-        """
-        logger.info(f"💎 触发稳步上涨警报 [{symbol}]，推送通知...")
-        
-        # 优先发送到稳步上涨专用通道
-        if self.enable_growth_channel:
-            if self.growth_dingtalk_webhook:
-                await self.send_dingtalk(
-                    message, 
-                    at_all=False, 
-                    webhook=self.growth_dingtalk_webhook,
-                    secret=self.growth_dingtalk_secret
-                )
-            if self.growth_wechat_webhook:
-                await self.send_wechat(message, webhook=self.growth_wechat_webhook)
-        else:
-            # 如果没有配置专用通道，发送到主通道
-            if self.enable_dingtalk:
-                await self.send_dingtalk(message, at_all=False)
-            if self.enable_wechat:
-                await self.send_wechat(message)
 
     def _get_binance_url(self, symbol: str, market_type: str = None, lang: str = "en") -> str:
         """
@@ -816,10 +596,22 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
         # 生成币安地址（根据市场类型）
         binance_url = self._get_binance_url(symbol, lang="zh-CN")
         
+        # 根据资金费率的正负值，生成不同的分析和建议内容
+        if funding_rate > 0:
+            # 正资金费率：多头支付费用给空头
+            analysis = "资金费率大幅偏离正常值，表明市场情绪极度失衡。高资金费率意味着多头支付高额费用给空头，可能预示短期市场反转或持续极端行情。"
+            suggestions = "- 多头谨慎追涨，注意回调风险\n- 空头可以考虑开仓或持有仓位\n- 关注资金费率变化趋势，可能预示市场转折点"
+            rate_color = "red"
+        else:
+            # 负资金费率：空头支付费用给多头
+            analysis = "资金费率大幅偏离正常值，表明市场情绪极度失衡。低资金费率意味着空头支付费用给多头，可能预示市场情绪转向看涨。"
+            suggestions = "- 空头谨慎做空，注意反弹风险\n- 多头可以考虑开仓或持有仓位\n- 关注资金费率变化趋势，可能预示市场转折点"
+            rate_color = "green"
+        
         message = f"""### ⚡ 资金费率异常警报
         
 **币种**: **{symbol}** [{exchange.upper()}]
-**资金费率**: <font color='red'>**{funding_rate:.4f}%**</font>
+**资金费率**: <font color='{rate_color}'>**{funding_rate:.4f}%**</font>
 **触发阈值**: {Config.FUNDING_RATE_THRESHOLD}%
 **当前价格**: {price_formatted}
 **触发时间**: {timestamp}
@@ -828,12 +620,10 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
 ---
         
 **分析**:
-资金费率大幅偏离正常值，表明市场情绪极度失衡。高资金费率意味着多头支付高额费用给空头，可能预示短期市场反转或持续极端行情。
+{analysis}
         
 **建议**:
-- 多头谨慎追涨，注意回调风险
-- 空头可以考虑开仓或持有仓位
-- 关注资金费率变化趋势，可能预示市场转折点
+{suggestions}
         
 ---
 <font color='comment'>*实时资金费率监控*</font>

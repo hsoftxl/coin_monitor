@@ -137,27 +137,4 @@ class MultiPlatformAnalyzer:
              
         return signals
 
-    def get_market_consensus(self, platform_metrics: Dict[str, Dict[str, Any]]) -> str:
-        """
-        Returns a high-level summary string based on flows.
-        """
-        positive_flows = 0
-        negative_flows = 0
-        total_flow = 0.0
-        
-        for p, m in platform_metrics.items():
-            flow = m.get('cumulative_net_flow', 0)
-            total_flow += flow
-            if flow > 1000: positive_flows += 1
-            elif flow < -1000: negative_flows += 1
-            
-        if positive_flows == 4:
-            return "强力看涨 (全平台净流入)"
-        elif negative_flows == 4:
-            return "强力看跌 (全平台净流出)"
-        elif total_flow > 50000000: # 50M
-             return f"倾向看涨 (总净流入: ${total_flow/1000000:.1f}M)"
-        elif total_flow < -50000000:
-             return f"倾向看跌 (总净流出: ${abs(total_flow)/1000000:.1f}M)"
-        else:
-             return "震荡/分歧 (无明确方向)"
+

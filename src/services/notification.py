@@ -420,53 +420,7 @@ class NotificationService:
             if self.enable_wechat:
                 await self.send_wechat(message)
 
-    async def send_panic_dump_alert(self, data: Dict, symbol: str):
-        """
-        发送主力暴力出货警报 (Panic Dump)
-        """
-        if not (self.enable_dingtalk or self.enable_wechat):
-            return
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        pct = data['pct_change'] # Positive value representing drop
-        vol = data['vol_ratio']
-        sell_ratio = data['sell_ratio'] * 100
-        price = data['price']
-        
-        # 生成币安地址（根据市场类型）
-        binance_url = self._get_binance_url(symbol, lang="zh-CN")
-        
-        message = f"""### 📉 主力暴力出货警报
-        
-**币种**: **{symbol}**
-**1分钟跌幅**: <font color='green'>**-{pct:.2f}%**</font>
-**瞬间量能**: <font color='green'>**{vol:.1f}x**</font> (vs 1h均值)
-**主动卖出**: <font color='green'>**{sell_ratio:.0f}%**</font> (恐慌抛售)
-**当前价格**: ${price:,.4f}
-**触发时间**: {timestamp}
-**币安地址**: [{symbol}]({binance_url})
-
----
-
-**分析**:
-监控到主力资金在**第1分钟**集中抛售，价格快速下杀，谨防踩踏风险！
-{f'''
-**策略建议**:
-**动作**: {data['strategy']['action']} (盈亏比 {data['strategy']['risk_reward']}:1)
-**卖出**: ${data['strategy']['entry']:.4f}
-**止损**: ${data['strategy']['sl']:.4f}
-**止盈**: ${data['strategy']['tp']:.4f}''' if 'strategy' in data else ''}
-
----
-<font color='comment'>*Panic Dump Detection*</font>
-"""
-        logger.critical(f"📉 触发主力出货警报 [{symbol}]，立即推送！")
-        
-        if self.enable_dingtalk:
-            await self.send_dingtalk(message, at_all=True)
-            
-        if self.enable_wechat:
-            await self.send_wechat(message)
 
     async def send_realtime_pump_alert(self, data: Dict, is_strategy_learned: bool = False):
         """
@@ -532,9 +486,125 @@ WebSocket 实时监控捕获，币种出现短时快速拉升，建议关注！
             if self.enable_wechat:
                 await self.send_wechat(message)
 
+    async def send_15m_volume_surge_alert(self, data: Dict):
+        """
+        发送 15m K线资金暴增警报。
+        使用拉盘专用通道推送。
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        symbol = data['symbol']
+        volume = data['volume']
+        volume_ratio = data['volume_ratio']
+        price = data['price']
+        change_pct = data['change_pct']
+        market_label = data.get('market_label', '现货')
 
+        direction_emoji = "📈" if change_pct > 0 else "📉"
+        direction_text = "拉涨" if change_pct > 0 else "砸盘"
 
-    def _get_binance_url(self, symbol: str, market_type: str = None, lang: str = "en") -> str:
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+
+        message = f"""### 💰 15m资金暴增警报 {direction_emoji}
+
+**币种**: **{symbol}** [{market_label}]
+**方向**: {direction_text}
+**15m成交额**: <font color='red'>**${volume:,.0f}**</font> USDT
+**量比 (vs均值)**: <font color='red'>**{volume_ratio:.1f}x**</font>
+**涨跌幅**: <font color='{"red" if change_pct > 0 else "green"}'>**{change_pct:+.2f}%**</font>
+**当前价格**: ${price:,.4f}
+**触发时间**: {timestamp}
+**币安地址**: [{symbol}]({binance_url})
+
+---
+**分析**:
+15分钟K线成交量异常放大至历史均值的 **{volume_ratio:.1f}倍**{'，伴随价格上涨，疑似主力资金入场。' if change_pct > 0 else '，伴随价格下跌，疑似主力出货或恐慌抛售。'}
+
+---
+<font color='comment'>*15m K线资金暴增监控*</font>
+"""
+        logger.info(f"💰 触发15m资金暴增警报 [{symbol} {market_label}]，推送通知...")
+
+        if self.enable_pump_channel:
+            if self.pump_dingtalk_webhook:
+                await self.send_dingtalk(
+                    message,
+                    at_all=True,
+                    webhook=self.pump_dingtalk_webhook,
+                    secret=self.pump_dingtalk_secret
+                )
+            if self.pump_wechat_webhook:
+                await self.send_wechat(message, webhook=self.pump_wechat_webhook)
+        else:
+            if self.enable_dingtalk:
+                await self.send_dingtalk(message, at_all=True)
+            if self.enable_wechat:
+                await self.send_wechat(message)
+
+    async def send_accumulation_alert(self, data: Dict, symbol: str):
+        """
+        发送庄家吸筹警报
+        使用拉盘专用通道推送（吸筹是拉盘的前兆）
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        vol_ratio = data.get('vol_ratio', 0)
+        cmf = data.get('cmf', 0)
+        price_position = data.get('price_position', 0)
+        buying_pressure = data.get('buying_pressure', 0)
+        price = data.get('price', 0)
+        volume = data.get('volume', 0)
+        grade = data.get('grade', 'B+')
+
+        binance_url = self._get_binance_url(symbol, lang="zh-CN")
+
+        grade_emoji = '🔥' if grade == 'A+' else '💎' if grade == 'A' else '📊'
+
+        message = f"""### 🐋 {grade_emoji} 庄家吸筹特征警报 [{grade}]
+
+**币种**: **{symbol}**
+**当前价格**: ${price:,.4f}
+**量比 (vs均量)**: <font color='red'>**{vol_ratio:.1f}x**</font>
+**成交额**: <font color='red'>**${volume:,.0f}**</font> USDT
+**CMF (资金流向)**: <font color='{"red" if cmf > 0 else "green"}'>**{cmf:+.3f}**</font>
+**价格位置**: <font color='red'>**{price_position*100:.0f}%**</font> (近期低位)
+**买方压力**: <font color='red'>**{buying_pressure*100:.0f}%**</font> (收盘K线上半部分)
+**触发时间**: {timestamp}
+**24h成交额**: {self._format_24h_vol(data.get('vol_24h', 0))}
+**币安地址**: [{symbol}]({binance_url})
+
+---
+**分析**:
+监控到{self._format_24h_vol(data.get('vol_24h', 0))}
+{chr(10).join(["1. 价格处于近期低位，成交量突然放大至均值的 {:.1f}倍".format(vol_ratio),
+"2. OBV持续上升，主力资金在低位悄悄吸筹",
+"3. CMF={:.3f}，资金呈净流入状态".format(cmf),
+"4. 收盘在K线上半部分({:.0f}%)，说明买盘积极而非出货".format(buying_pressure*100)])}
+
+⚠️ 吸筹信号是拉盘的前兆，建议持续关注后续价格走势确认。
+建议在下一个支撑位附近设止损观察。
+
+---
+<font color='comment'>*Accumulation Detection*</font>
+"""
+
+        logger.critical(f"🐋 触发庄家吸筹警报 [{symbol}] grade={grade}，推送通知...")
+
+        if self.enable_pump_channel:
+            if self.pump_dingtalk_webhook:
+                await self.send_dingtalk(
+                    message,
+                    at_all=True if grade in ('A+', 'A') else False,
+                    webhook=self.pump_dingtalk_webhook,
+                    secret=self.pump_dingtalk_secret
+                )
+            if self.pump_wechat_webhook:
+                await self.send_wechat(message, webhook=self.pump_wechat_webhook)
+        else:
+            if self.enable_dingtalk:
+                await self.send_dingtalk(message, at_all=True if grade in ('A+', 'A') else False)
+            if self.enable_wechat:
+                await self.send_wechat(message)
+
+    def _get_binance_url(self, symbol: str, market_type: Optional[str] = None, lang: str = "zh-CN") -> str:
         """
         根据市场类型和语言生成正确的Binance URL
         

@@ -4,75 +4,130 @@ Tests for analyzer modules
 
 import pytest
 import pandas as pd
+import numpy as np
 from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
-from src.analyzers.whale_watcher import WhaleWatcher
+from src.analyzers.accumulation import AccumulationAnalyzer
+from src.utils.indicators import (
+    calculate_obv,
+    is_obv_rising,
+    calculate_cmf,
+    calculate_price_position,
+    calculate_volume_profile_poc,
+    calculate_buying_pressure
+)
 
 
 class TestTakerFlowAnalyzer:
-    """Tests for TakerFlowAnalyzer"""
-    
+
     def test_analyze_empty_dataframe(self):
-        """Test analyzer with empty DataFrame"""
         analyzer = TakerFlowAnalyzer(window=50)
         df = pd.DataFrame()
         result = analyzer.analyze(df)
-        # Empty DataFrame should return default values (based on actual implementation)
         assert isinstance(result, dict)
-        # Check for either the new key or old key format
         assert 'net_flow' in result or 'cumulative_net_flow' in result
         assert 'trend' in result or 'buy_sell_ratio' in result
     
     def test_analyze_with_data(self, sample_candle_data):
-        """Test analyzer with sample data"""
         analyzer = TakerFlowAnalyzer(window=50)
         result = analyzer.analyze(sample_candle_data)
-        
         assert 'cumulative_net_flow' in result
         assert 'buy_sell_ratio' in result
         assert 'current_price' in result
-        assert result['cumulative_net_flow'] > 0  # Positive flow in sample data
+        assert result['cumulative_net_flow'] > 0
 
 
 class TestMultiPlatformAnalyzer:
-    """Tests for MultiPlatformAnalyzer"""
-    
-    def test_get_market_consensus_bullish(self, sample_platform_metrics):
-        """Test consensus detection for bullish market"""
+
+    def test_analyze_signals_bullish(self, sample_platform_metrics):
         analyzer = MultiPlatformAnalyzer()
-        consensus = analyzer.get_market_consensus(sample_platform_metrics)
-        # With 2 platforms having positive flows, total might not reach 50M threshold
-        # So it could be "震荡/分歧" or "倾向看涨" depending on total flow
-        assert isinstance(consensus, str)
-        assert len(consensus) > 0
-        # Just verify it returns a valid consensus string (any of the possible outcomes)
-        assert any(keyword in consensus for keyword in ['看涨', '看跌', '倾向', '震荡', '分歧', 'BULLISH', 'BEARISH'])
+        signals = analyzer.analyze_signals(sample_platform_metrics, symbol='BTC/USDT')
+        assert isinstance(signals, list)
     
-    def test_get_market_consensus_empty(self):
-        """Test consensus with empty metrics"""
+    def test_analyze_signals_empty(self):
         analyzer = MultiPlatformAnalyzer()
-        consensus = analyzer.get_market_consensus({})
-        assert consensus == "震荡/分歧 (无明确方向)"
+        signals = analyzer.analyze_signals({}, symbol='BTC/USDT')
+        assert signals == []
 
 
-class TestWhaleWatcher:
-    """Tests for WhaleWatcher"""
-    
-    def test_check_trades_below_threshold(self):
-        """Test whale detection with trades below threshold"""
-        watcher = WhaleWatcher(threshold=200000.0)
-        trades = [
-            {'cost': 50000.0, 'side': 'buy', 'amount': 1.0, 'price': 50000.0, 'timestamp': 1000, 'symbol': 'BTC/USDT'}
-        ]
-        whales = watcher.check_trades(trades)
-        assert len(whales) == 0
-    
-    def test_check_trades_above_threshold(self):
-        """Test whale detection with trades above threshold"""
-        watcher = WhaleWatcher(threshold=200000.0)
-        trades = [
-            {'cost': 300000.0, 'side': 'buy', 'amount': 1.0, 'price': 300000.0, 'timestamp': 1000, 'symbol': 'BTC/USDT'}
-        ]
-        whales = watcher.check_trades(trades)
-        assert len(whales) == 1
-        assert whales[0]['cost'] == 300000.0
+class TestIndicators:
+
+    def test_calculate_obv(self):
+        df = pd.DataFrame({
+            'close': [10.0, 10.5, 10.3, 10.8, 11.0],
+            'volume': [100, 200, 150, 300, 250]
+        })
+        obv = calculate_obv(df)
+        assert obv is not None
+        assert len(obv) == 5
+
+    def test_calculate_cmf(self):
+        np.random.seed(42)
+        n = 50
+        price = 100 + np.cumsum(np.random.randn(n) * 0.5)
+        df = pd.DataFrame({
+            'open': price - 0.2,
+            'high': price + 0.5,
+            'low': price - 0.5,
+            'close': price + 0.1,
+            'volume': np.random.randint(500, 2000, n)
+        })
+        cmf = calculate_cmf(df, period=20)
+        assert cmf is not None
+        assert isinstance(cmf, float)
+        assert -1.0 <= cmf <= 1.0
+
+    def test_calculate_price_position(self):
+        df = pd.DataFrame({
+            'open': [100]*80,
+            'high': [105]*80,
+            'low': [95]*80,
+            'close': [98]*80,
+            'volume': [1000]*80
+        })
+        pos = calculate_price_position(df, lookback=60)
+        assert pos is not None
+        assert 0.0 <= pos <= 1.0
+
+    def test_calculate_volume_profile_poc(self):
+        df = pd.DataFrame({
+            'close': [100.0]*40 + [102.0]*40,
+            'volume': [1000]*80
+        })
+        poc, dist = calculate_volume_profile_poc(df, bins=10, lookback=60)
+        assert poc is not None
+
+    def test_calculate_buying_pressure(self):
+        df = pd.DataFrame({
+            'open': [100],
+            'high': [105],
+            'low': [95],
+            'close': [103],
+            'volume': [1000]
+        })
+        bp = calculate_buying_pressure(df)
+        assert bp is not None
+        assert bp > 0.5
+
+
+class TestAccumulationAnalyzer:
+
+    def test_analyze_insufficient_data(self):
+        analyzer = AccumulationAnalyzer()
+        df = pd.DataFrame({
+            'open': [100], 'high': [101], 'low': [99], 'close': [100],
+            'volume': [1000]
+        })
+        result = analyzer.analyze(df, 'TEST/USDT')
+        assert result is None
+
+    def test_analyze_low_volume(self):
+        analyzer = AccumulationAnalyzer()
+        n = 80
+        df = pd.DataFrame({
+            'open': [100.0]*n, 'high': [101.0]*n, 'low': [99.0]*n,
+            'close': [100.0]*n, 'volume': [100.0]*n
+        })
+        df.loc[df.index[-1], 'volume'] = 200.0
+        result = analyzer.analyze(df, 'TEST/USDT')
+        assert result is None

@@ -8,12 +8,9 @@ from typing import Dict, Any
 from src.core.context import AnalysisContext
 from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
-from src.analyzers.whale_watcher import WhaleWatcher
-from src.analyzers.volume_spike import VolumeSpikeAnalyzer
 from src.analyzers.early_pump import EarlyPumpAnalyzer
-from src.analyzers.panic_dump import PanicDumpAnalyzer
-
 from src.analyzers.spot_futures_analyzer import SpotFuturesAnalyzer
+from src.analyzers.accumulation import AccumulationAnalyzer
 from src.strategies.entry_exit import EntryExitStrategy
 
 
@@ -38,7 +35,7 @@ def sample_platform_metrics():
     """Sample platform metrics for testing"""
     return {
         'binance': {
-            'cumulative_net_flow': 20000000.0,  # 20M - positive flow
+            'cumulative_net_flow': 20000000.0,
             'buy_sell_ratio': 1.5,
             'current_price': 100.0,
             'support_low': 95.0,
@@ -46,7 +43,7 @@ def sample_platform_metrics():
             'atr': 2.0
         },
         'okx': {
-            'cumulative_net_flow': 15000000.0,  # 15M - positive flow
+            'cumulative_net_flow': 15000000.0,
             'buy_sell_ratio': 1.3,
             'current_price': 100.0,
             'support_low': 95.0,
@@ -54,7 +51,7 @@ def sample_platform_metrics():
             'atr': 2.0
         },
         'bybit': {
-            'cumulative_net_flow': 10000000.0,  # 10M - positive flow
+            'cumulative_net_flow': 10000000.0,
             'buy_sell_ratio': 1.2,
             'current_price': 100.0,
             'support_low': 95.0,
@@ -62,7 +59,7 @@ def sample_platform_metrics():
             'atr': 2.0
         },
         'coinbase': {
-            'cumulative_net_flow': 5000000.0,  # 5M - positive flow
+            'cumulative_net_flow': 5000000.0,
             'buy_sell_ratio': 1.1,
             'current_price': 100.0,
             'support_low': 95.0,
@@ -79,22 +76,18 @@ def mock_analysis_context(mocker):
     
     taker_analyzer = TakerFlowAnalyzer(window=50)
     multi_analyzer = MultiPlatformAnalyzer()
-    whale_watcher = WhaleWatcher(threshold=200000.0)
-    vol_spike_analyzer = VolumeSpikeAnalyzer()
     early_pump_analyzer = EarlyPumpAnalyzer()
-    panic_dump_analyzer = PanicDumpAnalyzer()
     sf_analyzer = SpotFuturesAnalyzer()
+    accumulation_analyzer = AccumulationAnalyzer()
     strategy = EntryExitStrategy()
     
     ctx = AnalysisContext(
         connectors=connectors,
         taker_analyzer=taker_analyzer,
         multi_analyzer=multi_analyzer,
-        whale_watcher=whale_watcher,
-        vol_spike_analyzer=vol_spike_analyzer,
         early_pump_analyzer=early_pump_analyzer,
-        panic_dump_analyzer=panic_dump_analyzer,
         sf_analyzer=sf_analyzer,
+        accumulation_analyzer=accumulation_analyzer,
         strategy=strategy
     )
     

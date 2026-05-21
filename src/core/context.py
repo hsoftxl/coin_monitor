@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
 from src.analyzers.early_pump import EarlyPumpAnalyzer
-from src.analyzers.panic_dump import PanicDumpAnalyzer
 from src.analyzers.spot_futures_analyzer import SpotFuturesAnalyzer
+from src.analyzers.accumulation import AccumulationAnalyzer
 from src.strategies.entry_exit import EntryExitStrategy
 
 # 避免循环导入：使用 TYPE_CHECKING 和字符串类型提示
@@ -42,8 +42,8 @@ class AnalysisContext:
     taker_analyzer: TakerFlowAnalyzer
     multi_analyzer: MultiPlatformAnalyzer
     early_pump_analyzer: EarlyPumpAnalyzer
-    panic_dump_analyzer: PanicDumpAnalyzer
     sf_analyzer: SpotFuturesAnalyzer
+    accumulation_analyzer: AccumulationAnalyzer
     
     # 策略
     strategy: EntryExitStrategy

@@ -13,7 +13,7 @@ from src.analyzers.taker_flow import TakerFlowAnalyzer
 from src.analyzers.multi_platform import MultiPlatformAnalyzer
 from src.analyzers.spot_futures_analyzer import SpotFuturesAnalyzer
 from src.analyzers.early_pump import EarlyPumpAnalyzer
-from src.analyzers.panic_dump import PanicDumpAnalyzer
+from src.analyzers.accumulation import AccumulationAnalyzer
 from src.utils.discovery import SymbolDiscovery
 from src.services.notification import NotificationService
 from src.services.realtime_monitor import RealtimeMonitor
@@ -94,7 +94,7 @@ async def process_symbol(symbol: str, ctx: AnalysisContext) -> None:
         
         # Extract volatility level from signals
         for signal_type, signal_data in analysis_result.get('signals', []):
-            if signal_type in ('early_pump', 'panic_dump') and 'volatility_level' in signal_data:
+            if signal_type == 'early_pump' and 'volatility_level' in signal_data:
                 volatility_level = signal_data['volatility_level']
                 break
         
@@ -197,7 +197,7 @@ async def main():
 
     taker_analyzer = TakerFlowAnalyzer(window=50)
     early_pump_analyzer = EarlyPumpAnalyzer()
-    panic_dump_analyzer = PanicDumpAnalyzer()
+    accumulation_analyzer = AccumulationAnalyzer()
     multi_analyzer = MultiPlatformAnalyzer()
     sf_analyzer = SpotFuturesAnalyzer()  # Spot-Futures correlation analyzer
     
@@ -272,17 +272,17 @@ async def main():
             
             # Create analysis context
             ctx = AnalysisContext(
-                connectors=initialized,
-                taker_analyzer=taker_analyzer,
-                multi_analyzer=multi_analyzer,
-                early_pump_analyzer=early_pump_analyzer,
-                panic_dump_analyzer=panic_dump_analyzer,
-                sf_analyzer=sf_analyzer,
-                strategy=strategy,
-                notification_service=notification_service,
-                persistence=persistence,
-                market_regime=market_regime
-            )
+        connectors=initialized,
+        taker_analyzer=taker_analyzer,
+        multi_analyzer=multi_analyzer,
+        early_pump_analyzer=early_pump_analyzer,
+        sf_analyzer=sf_analyzer,
+        accumulation_analyzer=accumulation_analyzer,
+        strategy=strategy,
+        notification_service=notification_service,
+        persistence=persistence,
+        market_regime=market_regime
+    )
             
             # Process symbols in smaller chunks to reduce API load
             chunk_size = 2  # 进一步减少每次处理的符号数量

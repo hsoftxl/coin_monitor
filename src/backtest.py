@@ -14,6 +14,7 @@ from src.connectors.binance import BinanceConnector
 from src.processors.data_processor import DataProcessor
 from src.strategies.entry_exit import EntryExitStrategy
 from src.analyzers.taker_flow import TakerFlowAnalyzer
+from src.analyzers.accumulation import AccumulationAnalyzer
 from src.utils.logger import logger
 
 class Backtester:
@@ -23,7 +24,9 @@ class Backtester:
         self.connector = connector
         self.strategy = EntryExitStrategy()
         self.taker_analyzer = TakerFlowAnalyzer(window=50)
+        self.accumulation_analyzer = AccumulationAnalyzer()
         self.trades = []
+        self.accumulation_signals = []
         self.balance = 10000.0
         self.initial_balance = 10000.0
         self.position = None
@@ -131,6 +134,7 @@ class Backtester:
             self.df_1m = df
             
             self.df_5m = self.resample_data(self.df_1m, '5min')
+            self.df_15m = self.resample_data(self.df_1m, '15min')
             self.df_1h = self.resample_data(self.df_1m, '1h')
         finally:
             if self.should_close_connector and self.connector:
@@ -167,9 +171,13 @@ class Backtester:
             
             if not self.position:
                 self.check_entry(i, current_time)
+
+            if i % 15 == 0:
+                self._check_accumulation(current_time)
                 
         if print_results:
             self.print_results()
+            self._print_accumulation_stats()
 
     def check_exit(self, bar, timestamp):
         pos = self.position
@@ -289,6 +297,30 @@ class Backtester:
                 'tp': tp,
                 'time': timestamp
             }
+
+    def _check_accumulation(self, timestamp):
+        df_15m_upto = self.df_15m[self.df_15m.index <= timestamp]
+        if df_15m_upto.empty or len(df_15m_upto) < 70:
+            return
+        
+        signal = self.accumulation_analyzer.analyze(df_15m_upto, self.symbol)
+        if signal:
+            self.accumulation_signals.append({
+                'time': timestamp,
+                'price': signal['price'],
+                'vol_ratio': signal['vol_ratio'],
+                'cmf': signal['cmf'],
+                'price_position': signal['price_position'],
+                'grade': signal['grade'],
+                'desc': signal['desc']
+            })
+
+    def _print_accumulation_stats(self):
+        if not self.accumulation_signals:
+            return
+        print(f"\n🐋 Accumulation Signals: {len(self.accumulation_signals)}")
+        for s in self.accumulation_signals[:10]:
+            print(f"  {s['time']} | price={s['price']:.4f} | vol={s['vol_ratio']:.1f}x | CMF={s['cmf']:.3f} | pos={s['price_position']:.0%} | {s['grade']}")
 
     def calculate_max_drawdown(self) -> float:
         if not self.trades:

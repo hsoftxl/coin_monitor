@@ -119,6 +119,28 @@ class Config:
     REALTIME_PUMP_THRESHOLD = 2.0          # 涨幅阈值 % (Raise to avoid noise)
     REALTIME_MIN_VOLUME = 100000           # 最小成交额 USDT
     REALTIME_BLACKLIST = ["UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT", "BUSDUSDT", "USDCUSDT"]
+
+    # ==================== 15分钟K线资金暴增监控配置 ====================
+    ENABLE_15M_VOLUME_MONITOR = True          # 是否启用 15m K线资金暴增监控
+    VOLUME_SURGE_15M_THRESHOLD = 3.0          # 成交量倍数阈值 (当前成交量 / 近N根K线均值)
+    VOLUME_SURGE_15M_LOOKBACK = 12            # 回看K线数量 (用于计算均值)
+    VOLUME_SURGE_15M_MIN_VOLUME = 500000      # 最小成交额 USDT (低于此值不触发)
+    VOLUME_SURGE_15M_COOLDOWN = 600           # 冷却时间 (秒, 同一币种)
+    
+    # ==================== 庄家吸筹检测配置 ====================
+    ENABLE_ACCUMULATION_DETECTION = True       # 是否启用庄家吸筹检测
+    ACCUMULATION_VOL_MULTIPLIER = 2.2          # 量增倍数阈值 (成交量 / 均量)
+    ACCUMULATION_VOL_LOOKBACK = 20             # 均量计算周期
+    ACCUMULATION_MAX_VOL_MULTIPLIER = 6.0      # 最大量增倍数 (超过视为climax出货)
+    ACCUMULATION_OBV_RISING_BARS = 3           # OBV连续上升K线数
+    ACCUMULATION_CMF_PERIOD = 20               # CMF计算周期
+    ACCUMULATION_PRICE_POSITION_LOOKBACK = 60  # 价格位置回溯K线数
+    ACCUMULATION_PRICE_POSITION_THRESHOLD = 0.35  # 低位阈值 (ratio < 0.35)
+    ACCUMULATION_PRICE_STABILITY_RATIO = 0.995 # 价格稳定率 (close >= prev_close * 0.995)
+    ACCUMULATION_MIN_VOLUME_USDT = 500000      # 最小成交额 USDT
+    ACCUMULATION_COOLDOWN_SEC = 1800           # 冷却时间 (秒, 30分钟)
+    ACCUMULATION_ENABLE_POC_FILTER = False     # 启用POC支撑过滤 (初期建议关闭)
+    ACCUMULATION_POC_THRESHOLD = 2.0           # POC距离阈值 % (当前价格距POC < 2%)
     
     # ==================== 交易策略配置 ====================
     ENABLE_STRATEGY = True

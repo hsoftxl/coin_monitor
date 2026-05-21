@@ -197,26 +197,15 @@ async def analyze_platform(
              await ctx.notification_service.send_early_pump_alert(pump, symbol)
          signals.append(('early_pump', pump))
 
-    # Panic Dump Analysis
-    allow_short = True
-    if Config.SHORT_ONLY_IN_BEAR and ctx.market_regime not in ['BEAR', 'NEUTRAL_BEAR']:
-        allow_short = False
-        
-    dump = None
-    if allow_short:
-        dump = ctx.panic_dump_analyzer.analyze(
-        df,
-        symbol,
-        df_res=df_res,
-        sf_strength=sf_strength
-    )
-        
-    if dump:
-         dump['vol_24h'] = ticker_24h_vol
-         logger.critical(f"📉 [{symbol}] {dump['desc']}")
-         if ctx.notification_service:
-             await ctx.notification_service.send_panic_dump_alert(dump, symbol)
-         signals.append(('panic_dump', dump))
+    # Accumulation Detection
+    if Config.ENABLE_ACCUMULATION_DETECTION:
+        accumulation = ctx.accumulation_analyzer.analyze(df, symbol)
+        if accumulation:
+            accumulation['vol_24h'] = ticker_24h_vol
+            logger.critical(f"🐋 [{symbol}] {accumulation['desc']}")
+            if ctx.notification_service:
+                await ctx.notification_service.send_accumulation_alert(accumulation, symbol)
+            signals.append(('accumulation', accumulation))
 
 
     
